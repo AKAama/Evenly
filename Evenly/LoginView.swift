@@ -1,8 +1,8 @@
 //
 //  LoginView.swift
-//  ShareBill
+//  Evenly
 //
-//  Created by alex_yehui on 2025/12/14.
+//  Login and Register views
 //
 
 import SwiftUI
@@ -31,11 +31,11 @@ struct LoginView: View {
                     .font(.system(size: 80))
                     .foregroundStyle(.blue)
 
-                Text("ShareBill")
+                Text("Evenly")
                     .font(.largeTitle)
                     .fontWeight(.bold)
 
-                Text("轻松分摊，愉快记账，myhnb")
+                Text("轻松分摊，愉快记账")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -43,8 +43,8 @@ struct LoginView: View {
 
                 VStack(spacing: 16) {
                     CustomTextField(
-                        icon: "person.fill",
-                        placeholder: "手机号 / 邮箱 / 用户名",
+                        icon: "envelope.fill",
+                        placeholder: "邮箱",
                         text: $auth.loginIdentifier
                     )
 
@@ -124,11 +124,11 @@ struct RegisterView: View {
     @State private var showingImagePicker = false
     @State private var username = ""
     @State private var email = ""
-    @State private var phone = ""
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var usernameChecked = false
     @State private var isCheckingUsername = false
+    @State private var codeSent = false
 
     var body: some View {
         ScrollView {
@@ -136,25 +136,14 @@ struct RegisterView: View {
             VStack(spacing: 24) {
                 Spacer().frame(height: 20)
 
-                Button {
-                    showingImagePicker = true
-                } label: {
-                    if let image = avatarImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 100, height: 100)
-                            .clipShape(Circle())
-                    } else {
-                        ZStack {
-                            Circle()
-                                .fill(Color.gray.opacity(0.2))
-                                .frame(width: 100, height: 100)
-                            Image(systemName: "camera.fill")
-                                .font(.title)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                // Avatar placeholder
+                ZStack {
+                    Circle()
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 100, height: 100)
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
                 }
 
                 Text("点击上传头像")
@@ -212,24 +201,43 @@ struct RegisterView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.red)
                         }
-                    }
 
-                    // 手机号
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Image(systemName: "phone.fill")
-                                .foregroundStyle(.secondary)
-                            TextField("手机号", text: $phone)
-                                .keyboardType(.phonePad)
+                        // 发送验证码按钮
+                        if auth.isValidEmail(email) && !codeSent {
+                            Button {
+                                auth.sendVerificationCode(email: email) { error in
+                                    if error == nil {
+                                        codeSent = true
+                                    } else {
+                                        auth.registerError = error?.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    if auth.isSendingCode {
+                                        ProgressView()
+                                            .tint(.blue)
+                                    } else {
+                                        Text("发送验证码")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                            }
+                            .disabled(auth.isSendingCode)
                         }
-                        .padding()
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
 
-                        if !phone.isEmpty && !auth.isValidPhone(phone) {
-                            Text("请输入有效的手机号")
-                                .font(.caption2)
-                                .foregroundStyle(.red)
+                        // 验证码输入
+                        if codeSent {
+                            HStack {
+                                Image(systemName: "lock.fill")
+                                    .foregroundStyle(.secondary)
+                                TextField("验证码", text: $auth.verificationCode)
+                                    .keyboardType(.numberPad)
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
                         }
                     }
 
@@ -318,11 +326,6 @@ struct RegisterView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingImagePicker) {
-            ImagePicker(image: $avatarImage) {
-                showingImagePicker = false
-            }
-        }
     }
 
     // 点击空白处收起键盘
@@ -341,18 +344,18 @@ struct RegisterView: View {
     private var canRegister: Bool {
         auth.isValidUsername(username) &&
         auth.isValidEmail(email) &&
-        auth.isValidPhone(phone) &&
+        codeSent &&
+        !auth.verificationCode.isEmpty &&
         password.count >= 6 &&
         password == confirmPassword
     }
 
     private func register() {
-        auth.performRegister(
+        auth.signUp(
             username: username,
             email: email,
-            phone: phone,
-            password: password,
-            avatar: avatarImage
+            phone: "",
+            password: password
         ) { error in
             if error == nil {
                 isShowingRegister = false
@@ -396,82 +399,6 @@ struct CustomSecureField: View {
         .padding()
         .background(Color.gray.opacity(0.1))
         .cornerRadius(8)
-    }
-}
-
-// MARK: - Image Picker
-
-struct ImagePicker: UIViewControllerRepresentable {
-    @Binding var image: UIImage?
-    let onDismiss: () -> Void
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: ImagePicker
-
-        init(_ parent: ImagePicker) {
-            self.parent = parent
-        }
-
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            parent.image = info[.originalImage] as? UIImage
-            parent.onDismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.onDismiss()
-        }
-    }
-}
-
-// MARK: - AuthManager Extension for Register
-
-extension AuthManager {
-    func performRegister(
-        username: String,
-        email: String,
-        phone: String,
-        password: String,
-        avatar: UIImage?,
-        completion: @escaping (Error?) -> Void
-    ) {
-        isLoading = true
-        registerError = nil
-
-        signUp(username: username, email: email, phone: phone, password: password) { [weak self] error in
-            guard let self else { return }
-            self.isLoading = false
-
-            if let error = error {
-                self.registerError = error.localizedDescription
-                completion(error)
-                return
-            }
-
-            // 上传头像
-            if let avatar = avatar,
-               let imageData = avatar.jpegData(compressionQuality: 0.8) {
-                self.updateAvatar(imageData) { avatarError in
-                    if avatarError != nil {
-                        self.registerError = "账户创建成功，但头像上传失败"
-                    }
-                    completion(avatarError)
-                }
-            } else {
-                completion(nil)
-            }
-        }
     }
 }
 

@@ -2,23 +2,32 @@
 .DS_Store
 DerivedData/
 *.xcuserstate
-
-# User-specific Xcode data
+*.xcuserdatad
 xcuserdata/
-*.xcuserdatad/
 
-# Build
+# Build products
 build/
 *.ipa
 *.dSYM.zip
 *.dSYM
 
 # Swift Package Manager
-.swiftpm/xcode/package.xcworkspace/xcuserdata/
+.swiftpm/
+Packages/
+Package.resolved
 
 # CocoaPods
 Pods/
 
+# Xcode automatic schemes
+xcshareddata/
+
+# App icons
+Assets.xcassets/AppIcon.appiconset/
+
 # Logs
 *.log
 
+# Environment files
+.env
+.env.local

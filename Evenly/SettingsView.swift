@@ -1,12 +1,11 @@
 //
 //  SettingsView.swift
-//  ShareBill
+//  Evenly
 //
-//  Created by alex_yehui on 2025/12/14.
+//  Settings view
 //
 
 import SwiftUI
-import FirebaseAuth
 
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthManager
@@ -51,7 +50,7 @@ struct SettingsView: View {
                         HStack {
                             Text("邮箱")
                             Spacer()
-                            Text(user.email ?? "")
+                            Text(user.email)
                                 .foregroundStyle(.secondary)
                         }
 
@@ -147,7 +146,8 @@ struct SettingsView: View {
     }
 
     private func resetPassword() {
-        guard let user = auth.user, let email = user.email else { return }
+        guard let user = auth.user else { return }
+        let email = user.email
         isLoading = true
         auth.resetPassword(email: email) { error in
             isLoading = false

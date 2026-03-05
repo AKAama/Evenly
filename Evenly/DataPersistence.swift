@@ -2,7 +2,7 @@ import Foundation
 
 class DataPersistence {
     
-    private static let ledgersKey = "ShareBill.ledgers"
+    private static let ledgersKey = "Evenly.ledgers"
     
     static func saveLedgers(_ ledgers: [Ledger]) {
         do {

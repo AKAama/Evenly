@@ -1,6 +1,6 @@
 //
 //  DataManagementView.swift
-//  ShareBill
+//  Evenly
 //
 //  Created by alex_yehui on 2025/12/14.
 //
@@ -86,7 +86,7 @@ struct DataManagementView: View {
             isPresented: $isExporting,
             document: getExportDocument(),
             contentType: .plainText,
-            defaultFilename: "ShareBill_Export"
+            defaultFilename: "Evenly_Export"
         ) { result in
             switch result {
             case .success(let url):
@@ -106,7 +106,7 @@ struct DataManagementView: View {
     }
 
     private func getExportDocument() -> TextFile {
-        var text = "ShareBill 导出\n"
+        var text = "Evenly 导出\n"
         text += "==========\n\n"
 
         for ledger in ledgerStore.ledgers {

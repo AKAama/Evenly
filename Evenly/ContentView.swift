@@ -1,12 +1,11 @@
 //
 //  ContentView.swift
-//  ShareBill
+//  Evenly
 //
-//  Created by alex_yehui on 2025/12/14.
+//  Main content view with tab navigation
 //
 
 import SwiftUI
-import FirebaseAuth
 struct ContentView: View {
     @StateObject var auth = AuthManager()
     @StateObject var ledgerStore = LedgerStore()
@@ -42,8 +41,8 @@ struct ContentView: View {
                         }
                         .tag(0)
                         .onAppear {
-                            // 使用 Firebase Auth 直接获取当前用户，避免 auth.user 还没更新的问题
-                            if let userId = Auth.auth().currentUser?.uid {
+                            // Use user ID from AuthManager
+                            if let userId = auth.user?.id {
                                 ledgerStore.bind(userId: userId)
                             }
                         }
@@ -83,12 +82,14 @@ struct ContentView: View {
             case .addExpense:
                 if let ledger = ledgerStore.currentLedger {
                     AddExpenseView(participants: ledger.participants) { newExpense in
-                        if !newExpense.title.isEmpty {
-                            var updatedLedger = ledger
-                            updatedLedger.expenses.append(newExpense)
-                            ledgerStore.updateLedger(updatedLedger)
+                        ledgerStore.addExpense(newExpense, to: ledger) { result in
+                            switch result {
+                            case .success:
+                                sheetType = nil
+                            case .failure(let error):
+                                print("Failed to add expense: \(error)")
+                            }
                         }
-                        sheetType = nil
                     }
                 }
 
@@ -186,11 +187,10 @@ struct ContentView: View {
                         expenseRowView(expense)
                     }
                     .onDelete { indexSet in
-                        var updated = ledger
                         for index in indexSet.sorted(by: >) {
-                            updated.expenses.remove(at: index)
+                            let expense = ledger.expenses[index]
+                            ledgerStore.deleteExpense(expense, from: ledger) { _ in }
                         }
-                        ledgerStore.updateLedger(updated)
                     }
                 }
             }

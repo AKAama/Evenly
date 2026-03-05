@@ -1,12 +1,11 @@
 //
 //  LedgerListView.swift
-//  ShareBill
+//  Evenly
 //
-//  Created by alex_yehui on 2025/12/14.
+//  Ledger list view
 //
 
 import SwiftUI
-import FirebaseAuth
 
 struct LedgerListView: View {
     @EnvironmentObject var auth: AuthManager
@@ -34,11 +33,11 @@ struct LedgerListView: View {
             }
         }
         .onAppear {
-            if let uid = auth.user?.uid {
+            if let uid = auth.user?.id {
                 store.bind(userId: uid)
             }
         }
-        .onChange(of: auth.user?.uid) { _, newValue in
+        .onChange(of: auth.user?.id) { _, newValue in
             if let uid = newValue {
                 store.bind(userId: uid)
             } else {

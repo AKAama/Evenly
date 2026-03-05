@@ -1,6 +1,6 @@
 //
 //  ThemeManager.swift
-//  ShareBill
+//  Evenly
 //
 //  Created by alex_yehui on 2025/12/14.
 //

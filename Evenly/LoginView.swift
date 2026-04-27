@@ -24,22 +24,32 @@ struct LoginView: View {
     private var loginView: some View {
         ScrollView {
             dismissKeyboardGesture
-            VStack(spacing: 24) {
+            VStack(spacing: 32) {
                 Spacer().frame(height: 60)
 
-                Image(systemName: "yensign.circle.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(.blue)
+                // App Logo
+                ZStack {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(width: 96, height: 96)
+                    
+                    Image(systemName: "equal.circle.fill")
+                        .font(.system(size: 54, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
 
-                Text("Evenly")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+                VStack(spacing: 8) {
+                    Text("Evenly")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.primary)
+                    
+                    Text("轻松分摊，愉快记账")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
 
-                Text("轻松分摊，愉快记账")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Spacer().frame(height: 40)
+                Spacer().frame(height: 32)
 
                 VStack(spacing: 16) {
                     CustomTextField(
@@ -55,16 +65,24 @@ struct LoginView: View {
                     )
 
                     if let error = auth.loginError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .multilineTextAlignment(.center)
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                        .multilineTextAlignment(.center)
                     }
 
                     Button {
+                        HapticManager.impact(.medium)
                         auth.signIn(identifier: auth.loginIdentifier, password: auth.loginPassword) { error in
                             if let error = error {
                                 auth.loginError = error.localizedDescription
+                                HapticManager.notificationOccurred(.error)
+                            } else {
+                                HapticManager.notificationOccurred(.success)
                             }
                         }
                     } label: {
@@ -74,30 +92,42 @@ struct LoginView: View {
                                     .tint(.white)
                             } else {
                                 Text("登录")
+                                    .fontWeight(.semibold)
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty ? Color.gray : Color.blue)
+                        )
                         .foregroundStyle(.white)
-                        .cornerRadius(12)
                     }
+                    .buttonStyle(.spring(.medium))
                     .disabled(auth.isLoading || auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty)
                 }
                 .padding(.horizontal, 24)
 
-                Spacer().frame(height: 20)
+                Spacer().frame(height: 24)
 
                 Button {
+                    HapticManager.impact(.light)
                     isShowingRegister = true
                 } label: {
-                    Text("还没有账号？立即注册")
-                        .font(.subheadline)
+                    HStack {
+                        Text("还没有账号？")
+                            .foregroundStyle(.secondary)
+                        Text("立即注册")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.blue)
+                    }
+                    .font(.subheadline)
                 }
 
                 Spacer()
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationBarHidden(true)
     }
 
@@ -317,6 +347,7 @@ struct RegisterView: View {
                 Spacer().frame(height: 40)
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("注册")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -370,18 +401,30 @@ struct CustomTextField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
+    
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isFocused ? .blue : .secondary)
+                .frame(width: 20)
+            
             TextField(placeholder, text: $text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .focused($isFocused)
         }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemGray6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isFocused ? Color.blue : Color.clear, lineWidth: 2)
+                )
+        )
     }
 }
 
@@ -389,16 +432,42 @@ struct CustomSecureField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
+    @State private var isPasswordVisible = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(.secondary)
-            SecureField(placeholder, text: $text)
+                .foregroundStyle(isFocused ? .blue : .secondary)
+                .frame(width: 20)
+            
+            if isPasswordVisible {
+                TextField(placeholder, text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($isFocused)
+            } else {
+                SecureField(placeholder, text: $text)
+                    .focused($isFocused)
+            }
+            
+            Button {
+                isPasswordVisible.toggle()
+            } label: {
+                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemGray6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isFocused ? Color.blue : Color.clear, lineWidth: 2)
+                )
+        )
     }
 }
 

@@ -12,18 +12,21 @@ struct Person: Identifiable, Codable, Hashable {
     let name: String
     /// Backend user ID
     var userId: String?
+    var isTemporary: Bool
 
-    init(id: UUID = UUID(), name: String, userId: String? = nil) {
+    init(id: UUID = UUID(), name: String, userId: String? = nil, isTemporary: Bool = false) {
         self.id = id
         self.name = name
         self.userId = userId
+        self.isTemporary = isTemporary
     }
 
     // Create from MemberResponse
     init(from member: MemberResponse) {
-        self.id = UUID()
-        self.name = member.nickname ?? member.user?.displayName ?? member.user?.email ?? "Unknown"
+        self.id = UUID(uuidString: member.id) ?? UUID()
+        self.name = member.nickname ?? member.temporaryName ?? member.user?.displayName ?? member.user?.email ?? "Unknown"
         self.userId = member.userId
+        self.isTemporary = member.isTemporary
     }
 }
 
@@ -40,6 +43,17 @@ extension Person: Equatable {
             return lhsUserId == rhsUserId
         }
         return lhs.name == rhs.name && lhs.id == rhs.id
+    }
+}
+
+extension Person {
+    func hash(into hasher: inout Hasher) {
+        if let userId {
+            hasher.combine(userId)
+        } else {
+            hasher.combine(id)
+            hasher.combine(name)
+        }
     }
 }
 
@@ -86,7 +100,7 @@ struct Ledger: Identifiable, Codable {
         self.id = UUID(uuidString: response.id) ?? UUID()
         self.title = response.name
         self.ownerId = response.ownerId
-        self.memberIds = response.members.map { $0.userId }
+        self.memberIds = response.members.compactMap { $0.userId }
         self.participants = response.members.map { Person(from: $0) }
         self.expenses = []
         self.members = response.members

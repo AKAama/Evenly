@@ -98,13 +98,29 @@ struct PasswordChange: Encodable {
 
 // MARK: - Ledger Models
 
+struct MemberCreate: Encodable {
+    let userId: String?
+    let nickname: String?
+    let isTemporary: Bool
+    let temporaryName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case nickname
+        case isTemporary = "is_temporary"
+        case temporaryName = "temporary_name"
+    }
+}
+
 struct LedgerCreate: Encodable {
     let name: String
     let currency: String?
+    let members: [MemberCreate]
 
     enum CodingKeys: String, CodingKey {
         case name
         case currency
+        case members
     }
 }
 
@@ -147,43 +163,59 @@ struct LedgerWithMembers: Decodable {
 // MARK: - Member Models
 
 struct AddMemberRequest: Encodable {
-    let userId: String
+    let userId: String?
     let nickname: String?
+    let isTemporary: Bool
+    let temporaryName: String?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case nickname
+        case isTemporary = "is_temporary"
+        case temporaryName = "temporary_name"
     }
 }
 
 struct MemberResponse: Codable, Identifiable {
-    var id: String { userId }
-    let userId: String
+    let id: String
+    let userId: String?
     let nickname: String?
     let joinedAt: Date?
     let user: UserResponse?
+    let isTemporary: Bool
+    let temporaryName: String?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case userId = "user_id"
         case nickname
         case joinedAt = "joined_at"
         case user
+        case isTemporary = "is_temporary"
+        case temporaryName = "temporary_name"
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(userId, forKey: .userId)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(userId, forKey: .userId)
         try container.encodeIfPresent(nickname, forKey: .nickname)
         try container.encodeIfPresent(joinedAt, forKey: .joinedAt)
         try container.encodeIfPresent(user, forKey: .user)
+        try container.encode(isTemporary, forKey: .isTemporary)
+        try container.encodeIfPresent(temporaryName, forKey: .temporaryName)
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        userId = try container.decode(String.self, forKey: .userId)
+        let decodedId = try container.decodeIfPresent(String.self, forKey: .id)
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
         nickname = try container.decodeIfPresent(String.self, forKey: .nickname)
         joinedAt = try container.decodeIfPresent(Date.self, forKey: .joinedAt)
         user = try container.decodeIfPresent(UserResponse.self, forKey: .user)
+        isTemporary = try container.decodeIfPresent(Bool.self, forKey: .isTemporary) ?? false
+        temporaryName = try container.decodeIfPresent(String.self, forKey: .temporaryName)
+        id = decodedId ?? userId ?? UUID().uuidString
     }
 }
 

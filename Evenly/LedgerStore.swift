@@ -40,15 +40,13 @@ final class LedgerStore: ObservableObject {
         // Start polling for ledgers
         fetchLedgers()
 
-        // Set up polling
+        // Keep data stable while users are editing forms. Mutations refresh their own data.
         startPolling()
     }
 
     private func startPolling() {
         pollingTimer?.invalidate()
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.fetchLedgers()
-        }
+        pollingTimer = nil
     }
 
     func stop() {
@@ -70,19 +68,18 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     self.ledgers = responses.map { Ledger(from: $0) }.sorted { $0.title < $1.title }
 
-                    // Restore current ledger
-                    if let savedId = UserDefaults.standard.string(forKey: self.userDefaultsKey),
-                       let uuid = UUID(uuidString: savedId),
-                       let ledger = self.ledgers.first(where: { $0.id == uuid }) {
-                        self.currentLedger = ledger
-                        print("Restored current ledger: \(ledger.title)")
-                    } else if let first = self.ledgers.first {
-                        self.currentLedger = first
-                        print("Set first ledger as current: \(first.title)")
-                    }
+                    let selectedId = self.currentLedger?.id
+                        ?? UserDefaults.standard.string(forKey: self.userDefaultsKey).flatMap(UUID.init(uuidString:))
+                        ?? self.ledgers.first?.id
 
-                    // Fetch full details for each ledger to get members
-                    self.fetchLedgerDetails()
+                    if let selectedId,
+                       let ledger = self.ledgers.first(where: { $0.id == selectedId }) {
+                        self.currentLedger = ledger
+                        UserDefaults.standard.set(ledger.id.uuidString, forKey: self.userDefaultsKey)
+                        self.fetchLedgerDetails(ledgerId: ledger.id)
+                    } else {
+                        self.currentLedger = nil
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -92,7 +89,7 @@ final class LedgerStore: ObservableObject {
         }
     }
 
-    private func fetchLedgerDetails() {
+    private func fetchAllLedgerDetails() {
         for (index, ledger) in ledgers.enumerated() {
             Task {
                 do {
@@ -114,21 +111,64 @@ final class LedgerStore: ObservableObject {
         }
     }
 
+    func fetchLedgerDetails(ledgerId: UUID) {
+        Task {
+            do {
+                let response: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledgerId.uuidString))
+                let updatedLedger = Ledger(from: response)
+
+                await MainActor.run {
+                    if let index = self.ledgers.firstIndex(where: { $0.id == ledgerId }) {
+                        var merged = updatedLedger
+                        if self.currentLedger?.id == ledgerId {
+                            merged.expenses = self.currentLedger?.expenses ?? []
+                        } else {
+                            merged.expenses = self.ledgers[index].expenses
+                        }
+                        self.ledgers[index] = merged
+                        self.currentLedger = merged
+                        self.fetchExpenses(for: merged)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                }
+            }
+        }
+    }
+
     // MARK: - Current Ledger
 
     func setCurrentLedger(_ ledger: Ledger) {
         currentLedger = ledger
         UserDefaults.standard.set(ledger.id.uuidString, forKey: userDefaultsKey)
+        fetchLedgerDetails(ledgerId: ledger.id)
+    }
 
-        // Fetch expenses for current ledger
-        fetchExpenses(for: ledger)
+    func applyUpdatedLedger(_ ledger: Ledger) {
+        if let index = ledgers.firstIndex(where: { $0.id == ledger.id }) {
+            ledgers[index] = ledger
+        } else {
+            ledgers.append(ledger)
+        }
+
+        if currentLedger?.id == ledger.id {
+            currentLedger = ledger
+        }
     }
 
     // MARK: - Ledger Operations
 
     func createLedger(_ ledger: Ledger, completion: @escaping (Error?) -> Void) {
-        guard let userId = userId else {
+        guard userId != nil else {
             completion(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"]))
+            return
+        }
+
+        // 检查是否存在同名账本
+        if ledgers.contains(where: { $0.title.lowercased() == ledger.title.lowercased() }) {
+            completion(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "已存在同名账本"]))
             return
         }
 
@@ -136,19 +176,39 @@ final class LedgerStore: ObservableObject {
 
         Task {
             do {
+                // Convert participants to MemberCreate array
+                let members = ledger.participants.map { participant -> MemberCreate in
+                    if participant.isTemporary {
+                        return MemberCreate(
+                            userId: nil,
+                            nickname: participant.name,
+                            isTemporary: true,
+                            temporaryName: participant.name
+                        )
+                    } else {
+                        return MemberCreate(
+                            userId: participant.userId,
+                            nickname: participant.name,
+                            isTemporary: false,
+                            temporaryName: nil
+                        )
+                    }
+                }
+
                 let createRequest = LedgerCreate(
                     name: ledger.title,
-                    currency: nil
+                    currency: nil,
+                    members: members
                 )
 
-                let response: LedgerResponse = try await api.post(APIEndpoints.ledgers, body: createRequest)
+                let response: LedgerWithMembers = try await api.post(APIEndpoints.ledgers, body: createRequest)
 
                 await MainActor.run {
                     let newLedger = Ledger(from: response)
                     self.ledgers.append(newLedger)
                     self.currentLedger = newLedger
+                    UserDefaults.standard.set(newLedger.id.uuidString, forKey: self.userDefaultsKey)
                     self.isLoading = false
-                    self.fetchLedgerDetails()
                 }
                 completion(nil)
 
@@ -206,7 +266,7 @@ final class LedgerStore: ObservableObject {
                 }
 
                 // Add member to ledger
-                let addRequest = AddMemberRequest(userId: user.id, nickname: user.displayName)
+                let addRequest = AddMemberRequest(userId: user.id, nickname: user.displayName, isTemporary: false, temporaryName: nil)
                 let _: MemberResponse = try await api.post(APIEndpoints.addMember(ledgerId: ledger.id.uuidString), body: addRequest)
 
                 // Fetch updated ledger
@@ -285,14 +345,19 @@ final class LedgerStore: ObservableObject {
     }
 
     func addExpense(_ expense: Expense, to ledger: Ledger, completion: @escaping (Result<Expense, Error>) -> Void) {
-        guard let userId = userId else {
+        guard userId != nil else {
             completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
+            return
+        }
+
+        guard let payerId = expense.payer.userId, !payerId.isEmpty else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "付款人必须是已注册成员"])))
             return
         }
 
         Task {
             do {
-                let request = expense.toCreateRequest(payerId: userId, ledgerId: ledger.id)
+                let request = expense.toCreateRequest(payerId: payerId, ledgerId: ledger.id)
                 let response: ExpenseResponse = try await api.post(APIEndpoints.expenses(ledgerId: ledger.id.uuidString), body: request)
 
                 let newExpense = Expense(from: response, participants: expense.participants)
@@ -394,7 +459,7 @@ final class LedgerStore: ObservableObject {
         if let members = currentLedger?.members {
             for member in members {
                 if let user = member.user {
-                    names[member.userId] = user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户"
+                    names[member.userId ?? UUID().uuidString] = user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户"
                 }
             }
         }

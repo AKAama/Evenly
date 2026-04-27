@@ -37,10 +37,19 @@ enum APIError: LocalizedError {
 final class APIClient: ObservableObject {
     static let shared = APIClient()
 
-    // Configure base URL - change to your server URL
-    // For local development: "http://localhost:8000"
-    // For production: "https://evenly.ismyh.cn"
-    static let baseURL = "http://1.94.184.24:8000"
+    static let baseURL: String = {
+        if let configuredURL = Bundle.main.object(forInfoDictionaryKey: "EVENLY_API_BASE_URL") as? String,
+           !configuredURL.isEmpty,
+           !configuredURL.hasPrefix("$(") {
+            return configuredURL
+        }
+
+        #if DEBUG
+        return "http://192.168.124.14:8000"
+        #else
+        return "https://evenly.ismyh.cn"
+        #endif
+    }()
 
     @Published private(set) var isAuthenticated = false
     private var token: String?
@@ -48,6 +57,28 @@ final class APIClient: ObservableObject {
 
     private let session: URLSession
     private var cancellables = Set<AnyCancellable>()
+    private static let jsonDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+
+            let fractional = DateFormatter()
+            fractional.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+            fractional.locale = Locale(identifier: "en_US_POSIX")
+
+            let seconds = DateFormatter()
+            seconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            seconds.locale = Locale(identifier: "en_US_POSIX")
+
+            if let date = fractional.date(from: value) ?? seconds.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(value)")
+        }
+        return decoder
+    }()
 
     private init() {
         let config = URLSessionConfiguration.default
@@ -132,13 +163,7 @@ final class APIClient: ObservableObject {
             switch httpResponse.statusCode {
             case 200...299:
                 do {
-                    let decoder = JSONDecoder()
-                    // Custom date format for backend without timezone
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-                    formatter.locale = Locale(identifier: "en_US_POSIX")
-                    decoder.dateDecodingStrategy = .formatted(formatter)
-                    return try decoder.decode(T.self, from: data)
+                    return try Self.jsonDecoder.decode(T.self, from: data)
                 } catch {
                     print("📡 JSON Decode Error: \(error)")
                     throw APIError.decodingError(error)
@@ -208,13 +233,7 @@ final class APIClient: ObservableObject {
 
             switch httpResponse.statusCode {
             case 200...299:
-                let decoder = JSONDecoder()
-                // Custom date format for backend without timezone
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                decoder.dateDecodingStrategy = .formatted(formatter)
-                return try decoder.decode(T.self, from: data)
+                return try Self.jsonDecoder.decode(T.self, from: data)
             case 401:
                 throw APIError.unauthorized
             default:

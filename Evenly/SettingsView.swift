@@ -1,8 +1,7 @@
 //
 //  SettingsView.swift
-//  Evenly
 //
-//  Settings view
+//  Settings view with modern design
 //
 
 import SwiftUI
@@ -11,8 +10,6 @@ struct SettingsView: View {
     @EnvironmentObject var auth: AuthManager
     @EnvironmentObject var themeManager: ThemeManager
     @State private var showingResetPasswordAlert = false
-    @State private var showingDeleteAccountAlert = false
-    @State private var showingReauthenticateSheet = false
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var isLoading = false
@@ -21,7 +18,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 if let user = auth.user {
-                    Section("账户") {
+                    Section {
                         HStack(spacing: 16) {
                             if let avatarImage = auth.userProfile?.avatarImage {
                                 Image(uiImage: avatarImage)
@@ -35,91 +32,100 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
 
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
                                     .font(.headline)
+                                    .dynamicTypeSize(.accessibility2)
                                 if let username = auth.userProfile?.username {
                                     Text("@\(username)")
-                                        .font(.caption)
+                                        .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
                             }
                         }
-                        .padding(.vertical, 4)
-
+                        .padding(.vertical, 8)
+                        
                         HStack {
-                            Text("邮箱")
+                            Label("邮箱", systemImage: "envelope")
                             Spacer()
                             Text(user.email)
                                 .foregroundStyle(.secondary)
                         }
-
-                        Button("重置密码") {
-                            resetPassword()
+                        
+                        Button {
+                            HapticManager.impact(.medium)
+                            showUnsupportedFeature("密码重置功能需要后端接口上线后启用。")
+                        } label: {
+                            Label("重置密码", systemImage: "lock.rotation")
                         }
                         .disabled(isLoading)
-                    }
-                }
-
-                Section("外观") {
-                    Picker("主题", selection: $themeManager.currentTheme) {
-                        ForEach(AppTheme.allCases, id: \.self) { theme in
-                            Text(theme.rawValue).tag(theme)
-                        }
-                    }
-                }
-
-                Section("数据") {
-                    NavigationLink {
-                        DataManagementView()
-                    } label: {
-                        Text("导出与清除")
+                    } header: {
+                        Text("账户")
                     }
                 }
 
                 Section {
-                    Button(role: .destructive) {
-                        auth.signOut()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Text("退出登录")
-                            Spacer()
+                    Picker("主题", selection: $themeManager.currentTheme) {
+                        ForEach(AppTheme.allCases, id: \.self) { theme in
+                            Label(theme.rawValue, systemImage: theme == .system ? "circle.lefthalf.filled" : (theme == .light ? "sun.max" : "moon"))
+                                .tag(theme)
                         }
                     }
+                    .pickerStyle(.inline)
+                    .onChange(of: themeManager.currentTheme) { _, _ in
+                        HapticManager.selection.selectionChanged()
+                    }
+                } header: {
+                    Text("外观")
+                } footer: {
+                    Text("选择您喜欢的界面主题")
                 }
 
-                Section("危险操作") {
-                    Button(role: .destructive) {
-                        showingReauthenticateSheet = true
+                Section {
+                    NavigationLink {
+                        DataManagementView()
                     } label: {
-                        Text("删除账户")
+                        Label("导出与清除", systemImage: "square.and.arrow.up.on.square")
+                    }
+                } header: {
+                    Text("数据")
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        HapticManager.notificationOccurred(.warning)
+                        auth.signOut()
+                    } label: {
+                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                            .foregroundStyle(.red)
                     }
                 }
 
-                Section("关于") {
+                Section {
                     HStack {
-                        Text("版本")
+                        Label("版本", systemImage: "info.circle")
                         Spacer()
                         Text("1.0.0")
                             .foregroundStyle(.secondary)
                     }
-
+                    
                     Link(destination: URL(string: "https://example.com/privacy")!) {
-                        Text("隐私政策")
+                        Label("隐私政策", systemImage: "hand.raised")
                     }
-
+                    
                     Link(destination: URL(string: "https://example.com/terms")!) {
-                        Text("服务条款")
+                        Label("服务条款", systemImage: "doc.text")
                     }
-
+                    
                     HStack {
                         Spacer()
                         Text("© Alex_yehui")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                         Spacer()
                     }
+                } header: {
+                    Text("关于")
                 }
             }
             .listStyle(.insetGrouped)
@@ -129,20 +135,13 @@ struct SettingsView: View {
             } message: {
                 Text(alertMessage)
             }
-            .alert("删除账户", isPresented: $showingDeleteAccountAlert) {
-                Button("取消", role: .cancel) {}
-                Button("删除", role: .destructive) {
-                    deleteAccount()
-                }
-            } message: {
-                Text("此操作不可逆，删除后所有数据将无法恢复。")
-            }
-            .sheet(isPresented: $showingReauthenticateSheet) {
-                ReauthenticateView(onSuccess: {
-                    showingDeleteAccountAlert = true
-                })
-            }
         }
+    }
+
+    private func showUnsupportedFeature(_ message: String) {
+        alertTitle = "暂未支持"
+        alertMessage = message
+        showingResetPasswordAlert = true
     }
 
     private func resetPassword() {

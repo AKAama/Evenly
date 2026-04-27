@@ -13,6 +13,7 @@ struct DataManagementView: View {
     @State private var isExporting = false
     @State private var isClearingCache = false
     @State private var showingSuccessAlert = false
+    @State private var showingClearAlert = false
     @State private var alertTitle = ""
     @State private var alertMessage = ""
 
@@ -23,53 +24,81 @@ struct DataManagementView: View {
                     exportData()
                 } label: {
                     HStack {
-                        Text("导出所有账本")
+                        Label("导出所有账本", systemImage: "square.and.arrow.up")
                         Spacer()
                         if isExporting {
                             ProgressView()
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
                 .disabled(isExporting || ledgerStore.ledgers.isEmpty)
+            } header: {
+                Text("导出数据")
+            } footer: {
+                Text("将所有账本数据导出为文本文件")
             }
 
             Section {
                 Button(role: .destructive) {
-                    showingSuccessAlert = true
+                    showingClearAlert = true
                 } label: {
                     HStack {
-                        Text("清除本地缓存")
+                        Label("清除本地缓存", systemImage: "trash")
                         Spacer()
                         if isClearingCache {
                             ProgressView()
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
                 .disabled(isClearingCache)
+            } header: {
+                Text("存储")
             } footer: {
-                Text("清除缓存不会删除云端数据。")
+                Text("清除本地缓存不会删除云端数据")
             }
 
-            Section("统计") {
+            Section {
                 HStack {
-                    Text("账本数量")
+                    Label("账本数量", systemImage: "book.closed")
+                        .font(.subheadline)
                     Spacer()
                     Text("\(ledgerStore.ledgers.count)")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-
-                let totalExpenses = ledgerStore.ledgers.reduce(0) { $0 + $1.expenses.count }
+                
                 HStack {
-                    Text("账单总数")
+                    Label("账单总数", systemImage: "list.bullet.rectangle")
+                        .font(.subheadline)
                     Spacer()
-                    Text("\(totalExpenses)")
+                    Text("\(ledgerStore.ledgers.reduce(0) { $0 + $1.expenses.count })")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                
+                HStack {
+                    Label("参与者总数", systemImage: "person.2")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(ledgerStore.ledgers.reduce(0) { $0 + $1.participants.count })")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("统计")
             }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("数据管理")
-        .alert(alertTitle, isPresented: $showingSuccessAlert) {
+        .alert("清除缓存", isPresented: $showingClearAlert) {
             Button("取消", role: .cancel) {}
             Button("清除", role: .destructive) {
                 clearCache()

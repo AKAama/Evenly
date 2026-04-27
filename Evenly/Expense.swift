@@ -18,6 +18,8 @@ struct Expense: Identifiable, Codable {
     var expenseDate: Date?
     var createdAt: Date?
     var updatedAt: Date?
+    /// 成员确认状态: userId -> ConfirmationStatus
+    var confirmations: [String: ConfirmationStatus]
 
     init(
         id: UUID = UUID(),
@@ -29,7 +31,8 @@ struct Expense: Identifiable, Codable {
         note: String? = nil,
         expenseDate: Date? = nil,
         createdAt: Date? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        confirmations: [String: ConfirmationStatus] = [:]
     ) {
         self.id = id
         self.title = title
@@ -41,6 +44,7 @@ struct Expense: Identifiable, Codable {
         self.expenseDate = expenseDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.confirmations = confirmations
     }
 
     // Create from ExpenseWithDetails
@@ -55,6 +59,13 @@ struct Expense: Identifiable, Codable {
         self.expenseDate = response.expenseDate
         self.createdAt = response.createdAt
         self.updatedAt = response.updatedAt
+        
+        // Parse confirmations from response
+        var confirmations: [String: ConfirmationStatus] = [:]
+        for confirmation in response.confirmations {
+            confirmations[confirmation.userId] = ConfirmationStatus(rawValue: confirmation.status) ?? .pending
+        }
+        self.confirmations = confirmations
     }
 
     // Create from ExpenseResponse
@@ -69,7 +80,20 @@ struct Expense: Identifiable, Codable {
         self.expenseDate = response.expenseDate
         self.createdAt = response.createdAt
         self.updatedAt = response.updatedAt
+        self.confirmations = [:]
     }
+    
+    /// 获取特定成员的确认状态
+    func confirmationStatus(for person: Person) -> ConfirmationStatus {
+        guard let userId = person.userId else { return .pending }
+        return confirmations[userId] ?? .pending
+    }
+}
+
+enum ConfirmationStatus: String, Codable {
+    case pending
+    case confirmed
+    case rejected
 }
 
 enum ExpenseStatus: String, Codable {
@@ -81,13 +105,16 @@ enum ExpenseStatus: String, Codable {
 // Create API request model
 extension Expense {
     func toCreateRequest(payerId: String, ledgerId: UUID) -> ExpenseCreate {
-        let splits = participants.map { participant in
-            // If participant has a userId, use equal split
-            let shareAmount = amount / Decimal(participants.count)
-            return ExpenseSplitCreate(
-                userId: participant.userId ?? "",
-                amount: shareAmount
-            )
+        let registeredParticipants = participants.filter { ($0.userId?.isEmpty == false) }
+        let cents = NSDecimalNumber(decimal: amount * 100).rounding(accordingToBehavior: nil).intValue
+        let baseCents = cents / max(registeredParticipants.count, 1)
+        let remainder = cents % max(registeredParticipants.count, 1)
+
+        let splits = registeredParticipants.enumerated().compactMap { index, participant -> ExpenseSplitCreate? in
+            guard let userId = participant.userId else { return nil }
+            let participantCents = baseCents + (index < remainder ? 1 : 0)
+            let shareAmount = Decimal(participantCents) / 100
+            return ExpenseSplitCreate(userId: userId, amount: shareAmount)
         }
 
         return ExpenseCreate(

@@ -2,17 +2,21 @@
 //  ContentView.swift
 //  Evenly
 //
-//  Main content view with tab navigation
+//  Main content view with tab navigation and modern design
 //
 
 import SwiftUI
+
 struct ContentView: View {
     @StateObject var auth = AuthManager()
     @StateObject var ledgerStore = LedgerStore()
     @StateObject var themeManager = ThemeManager()
     @State private var selectedTab = 0
     @State private var sheetType: SheetType?
-
+    @State private var searchText = ""
+    @State private var showingDeleteConfirmation = false
+    @State private var expenseToDelete: Expense?
+    
     enum SheetType: Identifiable {
         case ledgerDrawer
         case addLedger
@@ -102,10 +106,12 @@ struct ContentView: View {
                     }
                     sheetType = nil
                 }
+                .environmentObject(ledgerStore)
                 .environmentObject(auth)
 
             case .memberManagement(let ledger):
                 AddMemberView(ledger: ledger)
+                    .environmentObject(ledgerStore)
             }
         }
     }
@@ -127,25 +133,32 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(ledgerStore.currentLedger?.title ?? "账本")
+            .searchable(text: $searchText, prompt: "搜索账单")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
+                        HapticManager.impact(.light)
                         sheetType = .ledgerDrawer
                     } label: {
                         Image(systemName: "line.3.horizontal")
                     }
+                    .buttonStyle(.spring(.light))
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
+                            HapticManager.impact(.medium)
                             sheetType = .addExpense
                         } label: {
                             Label("添加账单", systemImage: "plus.circle")
                         }
 
                         Button {
-                            sheetType = .memberManagement(ledgerStore.currentLedger!)
+                            HapticManager.impact(.medium)
+                            if let currentLedger = ledgerStore.currentLedger {
+                                sheetType = .memberManagement(currentLedger)
+                            }
                         } label: {
                             Label("管理成员", systemImage: "person.badge.plus")
                         }
@@ -175,77 +188,171 @@ struct ContentView: View {
     }
 
     private func ledgerDetailView(_ ledger: Ledger) -> some View {
-        List {
-            Section("账单") {
+        let filteredExpenses: [Expense] = {
+            if searchText.isEmpty {
+                return ledger.expenses
+            }
+            return ledger.expenses.filter { 
+                $0.title.localizedCaseInsensitiveContains(searchText) ||
+                $0.payer.name.localizedCaseInsensitiveContains(searchText)
+            }
+        }()
+        
+        return List {
+            Section {
                 if ledger.expenses.isEmpty {
-                    Text("暂无账单")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 20)
+                    VStack(spacing: 12) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.tertiary)
+                        Text("暂无账单")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Text("点击右上角添加第一笔账单")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 30)
+                } else if filteredExpenses.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.tertiary)
+                        Text("未找到匹配的账单")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 30)
                 } else {
-                    ForEach(ledger.expenses) { expense in
+                    ForEach(filteredExpenses) { expense in
                         expenseRowView(expense)
+                            .listRowAnimation()
                     }
-                    .onDelete { indexSet in
-                        for index in indexSet.sorted(by: >) {
-                            let expense = ledger.expenses[index]
-                            ledgerStore.deleteExpense(expense, from: ledger) { _ in }
-                        }
-                    }
-                }
+	                    .onDelete { indexSet in
+	                        HapticManager.notificationOccurred(.warning)
+	                        for index in indexSet.sorted(by: >) {
+	                            let expense = filteredExpenses[index]
+	                            ledgerStore.deleteExpense(expense, from: ledger) { _ in }
+	                        }
+	                    }
+	                }
+            } header: {
+                Text("账单")
             }
 
-            Section("分账结果") {
+            Section {
                 let results = calculateBalanceResults(for: ledger)
-                ForEach(results) { result in
-                    HStack {
-                        Text(result.person.name)
-                        Spacer()
-                        Text(result.displayText)
-                            .foregroundStyle(result.isPositive ? .green : result.balance < 0 ? .red : .secondary)
+                if results.isEmpty {
+                    Text("暂无参与者")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(results) { result in
+                        HStack {
+                            ZStack {
+                                Circle()
+                                    .fill(result.isPositive ? Color.green.opacity(0.2) : (result.balance < 0 ? Color.red.opacity(0.2) : Color.gray.opacity(0.2)))
+                                    .frame(width: 36, height: 36)
+                                Text(String(result.person.name.prefix(1)))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(result.isPositive ? .green : (result.balance < 0 ? .red : .primary))
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.person.name)
+                                    .font(.subheadline)
+                                Text(result.displayText)
+                                    .font(.caption)
+                            }
+                            
+                            Spacer()
+                            
+                            Text(formatAmount(result.balance))
+                                .font(.headline)
+                                .foregroundStyle(result.isPositive ? .green : (result.balance < 0 ? .red : .secondary))
+                        }
+                        .padding(.vertical, 2)
                     }
                 }
+            } header: {
+                Text("分账结果")
             }
 
-            Section("结算方案") {
+            Section {
                 let transfers = calculateTransfers(for: ledger)
                 if transfers.isEmpty {
-                    Text("账目已结清")
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Image(systemName: "checkmark.circle")
+                            .foregroundStyle(.green)
+                        Text("账目已结清")
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     ForEach(transfers) { transfer in
                         HStack {
-                            Text("\(transfer.from.name) → \(transfer.to.name)")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(transfer.from.name)
+                                    .font(.subheadline)
+                                Image(systemName: "arrow.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(transfer.to.name)
+                                    .font(.subheadline)
+                            }
+                            .frame(width: 80)
+                            
                             Spacer()
+                            
                             Text(formatAmount(transfer.amount))
+                                .font(.headline)
+                                .foregroundStyle(.orange)
                         }
                     }
                 }
+            } header: {
+                Text("结算方案")
             }
-        }
-        .listStyle(.insetGrouped)
-    }
+	        }
+	        .listStyle(.insetGrouped)
+	        .scrollDismissesKeyboard(.interactively)
+	    }
 
     private func expenseRowView(_ expense: Expense) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.15))
+                    .frame(width: 40, height: 40)
+                Image(systemName: "yensign.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.blue)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
                 Text(expense.title)
                     .font(.headline)
-                Spacer()
-                Text(formatAmount(expense.amount))
-                    .font(.headline)
+                    .lineLimit(1)
+                    .dynamicTypeSize(.accessibility2)
+                
+                HStack(spacing: 8) {
+                    Label(expense.payer.name, systemImage: "person")
+                    if expense.participants.count > 1 {
+                        Label("\(expense.participants.count)人分摊", systemImage: "person.2")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            HStack {
-                Text("\(expense.payer.name) 支付")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(expense.participants.map(\.name).joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            
+            Spacer()
+            
+            Text(formatAmount(expense.amount))
+                .font(.headline)
+                .foregroundStyle(.primary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Helper Methods

@@ -10,8 +10,16 @@ struct AddLedgerView: View {
     @State private var errorMessage: String?
     @State private var isAddingParticipant = false
     @State private var isSaving = false
-    @State private var saveSuccess = false
     @State private var saveError: String?
+    @State private var showSaveError = false
+    @State private var showAddTemporaryPrompt = false
+    @State private var pendingEmailForTemporary: String = ""
+    @FocusState private var focusedField: Field?
+
+    enum Field {
+        case title
+        case participant
+    }
 
     var onSave: ((Ledger) -> Void)?
     private let existingLedger: Ledger?
@@ -40,15 +48,30 @@ struct AddLedgerView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("账本名称") {
-                    TextField("输入账本名称", text: $title)
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "book.fill")
+                            .foregroundStyle(.blue)
+                            .frame(width: 24)
+                        
+                        TextField("输入账本名称", text: $title)
+                            .textInputAutocapitalization(.sentences)
+                            .focused($focusedField, equals: .title)
+                    }
+                } header: {
+                    Text("账本名称")
                 }
 
-                Section("添加参与者") {
-                    HStack {
-                        TextField("邮箱 / 用户名", text: $participantInput)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.badge.plus")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+                        
+	                        TextField("输入邮箱或名字搜索", text: $participantInput)
+	                            .textInputAutocapitalization(.never)
+	                            .autocorrectionDisabled()
+	                            .focused($focusedField, equals: .participant)
                             .onSubmit {
                                 addParticipant()
                             }
@@ -56,73 +79,167 @@ struct AddLedgerView: View {
                         if isAddingParticipant {
                             ProgressView()
                         } else {
-                            Button("添加") {
+                            Button {
+                                HapticManager.impact(.light)
                                 addParticipant()
+                            } label: {
+                                Text("添加")
+                                    .fontWeight(.medium)
                             }
                             .disabled(participantInput.isEmpty)
                         }
                     }
 
                     if let error = errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text(error)
+                                .font(.caption)
+                        }
                     }
-                }
+                } header: {
+	                    Text("搜索成员")
+	                } footer: {
+	                    Text("搜索已注册用户，或添加临时成员")
+	                }
 
                 if !participants.isEmpty {
-                    Section("参与者 (\(participants.count))") {
+                    Section {
                         ForEach(participants) { participant in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(participant.name)
-                                        .font(.body)
-                                    if case .found(_, let foundName) = participant.status {
-                                        Text("@\(foundName)")
-                                            .font(.caption)
-                                            .foregroundStyle(.green)
-                                    } else if participant.status == .notFound {
-                                        Text("未注册")
-                                            .font(.caption)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-
-                                Spacer()
-
-                                Button(role: .destructive) {
-                                    participants.removeAll { $0.id == participant.id }
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                            }
+                            participantRow(participant)
+                                .listRowAnimation()
                         }
+                    } header: {
+                        Text("参与者 (\(participants.count))")
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(existingLedger == nil ? "新建账本" : "编辑账本")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    Button {
+                        HapticManager.impact(.light)
                         dismiss()
+                    } label: {
+                        Text("取消")
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
+                    Button {
                         saveLedger()
+                    } label: {
+                        Text("保存")
+                            .fontWeight(.semibold)
                     }
-                    .fontWeight(.semibold)
                     .disabled(!canSave || isSaving)
                 }
-            }
-            .alert("保存成功", isPresented: $saveSuccess) {
-                Button("确定") {
-                    dismiss()
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") {
+                        focusedField = nil
+                    }
                 }
             }
+            .alert("保存失败", isPresented: $showSaveError) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text(saveError ?? "未知错误")
+            }
+            .alert("添加为临时用户？", isPresented: $showAddTemporaryPrompt) {
+                Button("添加") {
+                    // 用户确认添加为临时用户
+                    let participant = ParticipantInfo(name: pendingEmailForTemporary, status: .notFound, isLoading: false)
+                    self.participants.append(participant)
+                    self.participantInput = ""
+                }
+                Button("取消", role: .cancel) {
+                    self.participantInput = ""
+                    self.pendingEmailForTemporary = ""
+                }
+            } message: {
+                Text("该邮箱 \(pendingEmailForTemporary) 未注册，是否添加为临时成员？")
+            }
+        }
+    }
+
+    private func participantRow(_ participant: ParticipantInfo) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(statusColor(for: participant.status).opacity(0.2))
+                    .frame(width: 40, height: 40)
+                
+                Text(String(participant.name.prefix(1)))
+                    .font(.headline)
+                    .foregroundStyle(statusColor(for: participant.status))
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(participant.name)
+                    .font(.body)
+                
+                HStack(spacing: 4) {
+                    statusIcon(for: participant.status)
+                    statusText(for: participant.status)
+                }
+                .font(.caption)
+            }
+
+            Spacer()
+
+            Button(role: .destructive) {
+                HapticManager.impact(.light)
+                participants.removeAll { $0.id == participant.id }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func statusColor(for status: ParticipantInfo.Status) -> Color {
+        switch status {
+        case .idle:
+            return .gray
+        case .found:
+            return .green
+        case .notFound:
+            return .orange
+        case .local:
+            return .blue
+        }
+    }
+
+    private func statusIcon(for status: ParticipantInfo.Status) -> some View {
+        switch status {
+        case .idle:
+            return Image(systemName: "person.fill")
+        case .found:
+            return Image(systemName: "checkmark.circle.fill")
+        case .notFound:
+            return Image(systemName: "exclamationmark.circle.fill")
+        case .local:
+            return Image(systemName: "person.fill")
+        }
+    }
+
+    @ViewBuilder
+    private func statusText(for status: ParticipantInfo.Status) -> some View {
+        switch status {
+        case .idle:
+            Text("本地")
+        case .found(_, let foundName):
+            Text("@\(foundName)")
+        case .notFound:
+            Text("未注册")
+        case .local:
+            Text("本地")
         }
     }
 
@@ -161,7 +278,7 @@ struct AddLedgerView: View {
                     self.isAddingParticipant = false
                     self.participantInput = ""
 
-                    if let user = users.first(where: { $0.email.lowercased() == email.lowercased() }) {
+                    if let user = users.first(where: { $0.email.lowercased() == email.lowercased() }) ?? users.first {
                         let displayName = user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户"
 
                         // 检查该用户是否已添加
@@ -176,13 +293,12 @@ struct AddLedgerView: View {
                             self.participants.append(participant)
                         }
                     } else {
-                        // 用户未注册，添加为本地参与者
+                        // 用户未注册，弹窗询问是否添加为临时用户
                         if self.participants.contains(where: { $0.name.lowercased() == email.lowercased() }) {
                             self.errorMessage = "该参与者已添加"
                         } else {
-                            let participant = ParticipantInfo(name: email, status: .notFound, isLoading: false)
-                            self.participants.append(participant)
-                            self.errorMessage = "该邮箱未注册，将作为本地参与者"
+                            self.pendingEmailForTemporary = email
+                            self.showAddTemporaryPrompt = true
                         }
                     }
                 }
@@ -206,6 +322,8 @@ struct AddLedgerView: View {
 
     private func saveLedger() {
         guard canSave else { return }
+        
+        HapticManager.notificationOccurred(.success)
 
         isSaving = true
 
@@ -235,15 +353,20 @@ struct AddLedgerView: View {
         } else {
             // 创建模式
             ledgerStore.createLedger(ledger) { error in
-                isSaving = false
+                DispatchQueue.main.async {
+                    self.isSaving = false
 
-                if let error = error {
-                    saveError = error.localizedDescription
-                    return
+                    if let error = error {
+                        self.saveError = error.localizedDescription
+                        self.showSaveError = true
+                        HapticManager.notificationOccurred(.error)
+                        return
+                    }
+
+                    // 保存成功，自动关闭页面
+                    self.onSave?(ledger)
+                    self.dismiss()
                 }
-
-                saveSuccess = true
-                onSave?(ledger)
             }
         }
     }

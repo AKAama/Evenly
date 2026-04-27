@@ -3,6 +3,7 @@
 //  Evenly
 //
 //  Created by alex_yehui on 2025/12/14.
+//  Modern ledger detail with animations and haptics
 //
 
 import SwiftUI
@@ -14,6 +15,8 @@ struct LedgerDetailView: View {
     @State private var showingAddExpense = false
     @State private var showingEditExpense = false
     @State private var editingExpense: Expense?
+    @State private var showingDeleteLedgerAlert = false
+    @State private var searchText = ""
     
     struct BalanceResult: Identifiable {
         let id = UUID()
@@ -117,39 +120,65 @@ struct LedgerDetailView: View {
                                 HStack {
                                     Text(expense.title)
                                         .font(.headline)
+                                        .dynamicTypeSize(.accessibility2)
                                     Spacer()
                                     Text(formatAmount(expense.amount))
                                         .font(.headline)
+                                        .foregroundStyle(.blue)
                                 }
                                 HStack {
                                     Text("付款人: \(expense.payer.name)")
                                         .font(.subheadline)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                     Spacer()
                                 }
                                 HStack {
                                     Text("参与人: \(expense.participants.map { $0.name }.joined(separator: ", "))")
                                         .font(.subheadline)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                     Spacer()
                                 }
+                                
+                                // 确认状态显示
+                                if !expense.confirmations.isEmpty {
+                                    Divider()
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("确认状态")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        ForEach(expense.participants) { participant in
+                                            ConfirmationStatusRow(
+                                                participant: participant,
+                                                status: expense.confirmationStatus(for: participant)
+                                            )
+                                        }
+                                    }
+                                }
+                                
                                 Divider()
                             }
                             .padding(.vertical, 4)
                             .swipeActions(edge: .trailing) {
-                                Button("删除", role: .destructive) {
+                                Button(role: .destructive) {
+                                    HapticManager.notificationOccurred(.warning)
                                     var updated = ledger
                                     updated.expenses.removeAll { $0.id == expense.id }
                                     store.updateLedger(updated)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
                                 }
                             }
                             .swipeActions(edge: .leading) {
-                                Button("编辑") {
+                                Button {
+                                    HapticManager.impact(.medium)
                                     editingExpense = expense
                                     showingEditExpense = true
+                                } label: {
+                                    Label("编辑", systemImage: "pencil")
                                 }
                                 .tint(.blue)
                             }
+                            .listRowAnimation()
                         }
                         
                         if ledger.expenses.isEmpty {
@@ -204,12 +233,34 @@ struct LedgerDetailView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingAddExpense = true
+                Menu {
+                    Button {
+                        showingAddExpense = true
+                    } label: {
+                        Label("添加账单", systemImage: "plus.circle")
+                    }
+                    
+                    Divider()
+                    
+                    Button(role: .destructive) {
+                        showingDeleteLedgerAlert = true
+                    } label: {
+                        Label("删除账本", systemImage: "trash")
+                    }
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "ellipsis.circle")
                 }
             }
+        }
+        .alert("删除账本", isPresented: $showingDeleteLedgerAlert) {
+            Button("取消", role: .cancel) {}
+            Button("删除", role: .destructive) {
+                if let ledger = ledger {
+                    store.deleteLedger(ledger) { _ in }
+                }
+            }
+        } message: {
+            Text("确定要删除账本「\(ledger?.title ?? "")」吗？此操作不可撤销。")
         }
         .sheet(isPresented: $showingAddExpense) {
             if let ledger = ledger {
@@ -237,6 +288,56 @@ struct LedgerDetailView: View {
                     editingExpense = nil
                 }
             }
+        }
+    }
+}
+
+struct ConfirmationStatusRow: View {
+    let participant: Person
+    let status: ConfirmationStatus
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(participant.name)
+                .font(.subheadline)
+            
+            Spacer()
+            
+            HStack(spacing: 4) {
+                statusIcon
+                statusText
+            }
+            .font(.caption)
+        }
+    }
+    
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch status {
+        case .confirmed:
+            Image(systemName: "checkmark")
+                .foregroundColor(.green)
+        case .pending:
+            Image(systemName: "hourglass")
+                .foregroundColor(.orange)
+        case .rejected:
+            Image(systemName: "xmark")
+                .foregroundColor(.red)
+        }
+    }
+    
+    @ViewBuilder
+    private var statusText: some View {
+        switch status {
+        case .confirmed:
+            Text("已确认")
+                .foregroundColor(.green)
+        case .pending:
+            Text("待确认")
+                .foregroundColor(.orange)
+        case .rejected:
+            Text("已否决")
+                .foregroundColor(.red)
         }
     }
 }

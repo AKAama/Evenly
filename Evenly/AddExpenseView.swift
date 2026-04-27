@@ -3,6 +3,7 @@
 //  Evenly
 //
 //  Created by alex_yehui on 2025/12/14.
+//  Modern expense input with animations and haptics
 //
 
 import SwiftUI
@@ -12,11 +13,17 @@ struct AddExpenseView: View {
     @State private var title: String = ""
     @State private var amountText: String = ""
     @State private var selectedPayer: Person?
-    @State private var selectedParticipants: Set<Person> = []
+    @State private var selectedParticipantIds: Set<UUID> = []
+    @State private var isSaving = false
 
     let participants: [Person]
     var onSave: (Expense) -> Void
     private let existingId: UUID?
+    private var registeredParticipants: [Person] {
+        participants.filter { participant in
+            !participant.isTemporary && participant.userId?.isEmpty == false
+        }
+    }
 
     init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) -> Void) {
         self.participants = participants
@@ -27,7 +34,7 @@ struct AddExpenseView: View {
             _amountText = State(initialValue: formatAmountForInput(amount))
         }
         _selectedPayer = State(initialValue: expense?.payer)
-        _selectedParticipants = State(initialValue: Set(expense?.participants ?? []))
+        _selectedParticipantIds = State(initialValue: Set(expense?.participants.map(\.id) ?? []))
     }
 
     var body: some View {
@@ -35,6 +42,7 @@ struct AddExpenseView: View {
             Form {
                 Section("账单名称") {
                     TextField("输入账单名称", text: $title)
+                        .textInputAutocapitalization(.sentences)
                 }
 
                 Section("金额") {
@@ -45,36 +53,45 @@ struct AddExpenseView: View {
                             .keyboardType(.decimalPad)
                             .onChange(of: amountText) { _, newValue in
                                 amountText = formatAmountInput(newValue)
+                                HapticManager.selection.selectionChanged()
                             }
                     }
                 }
 
                 Section("付款人") {
-                    if participants.isEmpty {
-                        Text("请先在账本中添加参与者")
+                    if registeredParticipants.isEmpty {
+                        Text("请先在账本中添加已注册成员")
                             .foregroundStyle(.secondary)
                     } else {
                         Picker("选择付款人", selection: $selectedPayer) {
-                            ForEach(participants) { participant in
+                            ForEach(registeredParticipants) { participant in
                                 Text(participant.name).tag(participant as Person?)
                             }
                         }
                         .pickerStyle(.menu)
+                        .onChange(of: selectedPayer) { _, newPayer in
+                            if let newPayer {
+                                selectedParticipantIds.insert(newPayer.id)
+                            }
+                            HapticManager.impact(.light)
+                        }
                     }
                 }
 
                 Section("参与人") {
-                    if participants.isEmpty {
-                        Text("请先在账本中添加参与者")
+                    if registeredParticipants.isEmpty {
+                        Text("临时成员暂不支持参与账单分摊")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(participants) { participant in
+                        ForEach(registeredParticipants) { participant in
                             HStack {
                                 Text(participant.name)
+                                    .dynamicTypeSize(.accessibility2)
                                 Spacer()
-                                if selectedParticipants.contains(participant) {
+                                if selectedParticipantIds.contains(participant.id) {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(.blue)
+                                        .transition(.scale.combined(with: .opacity))
                                 }
                             }
                             .contentShape(Rectangle())
@@ -82,13 +99,23 @@ struct AddExpenseView: View {
                                 toggleParticipant(participant)
                             }
                         }
+                        .onAppear {
+                            if selectedPayer == nil, let first = registeredParticipants.first {
+                                selectedPayer = first
+                            }
+                            if selectedParticipantIds.isEmpty, let first = registeredParticipants.first {
+                                selectedParticipantIds.insert(first.id)
+                            }
+                        }
                     }
                 }
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedParticipantIds.count)
             .navigationTitle(existingId == nil ? "新建账单" : "编辑账单")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
+                        HapticManager.impact(.light)
                         dismiss()
                     }
                 }
@@ -97,15 +124,18 @@ struct AddExpenseView: View {
                         saveExpense()
                     }
                     .fontWeight(.semibold)
-                    .disabled(!canSave)
+                    .disabled(!canSave || isSaving)
                 }
             }
             .onAppear {
-                if selectedPayer == nil, let first = participants.first {
+                HapticManager.prepare()
+                if selectedPayer == nil, let first = registeredParticipants.first {
                     selectedPayer = first
                 }
-                if selectedParticipants.isEmpty, let first = participants.first {
-                    selectedParticipants.insert(first)
+                if let selectedPayer {
+                    selectedParticipantIds.insert(selectedPayer.id)
+                } else if selectedParticipantIds.isEmpty, let first = registeredParticipants.first {
+                    selectedParticipantIds.insert(first.id)
                 }
             }
         }
@@ -114,8 +144,10 @@ struct AddExpenseView: View {
     private var canSave: Bool {
         guard let amount = Decimal(string: amountText),
               !title.isEmpty,
-              selectedPayer != nil,
-              !selectedParticipants.isEmpty,
+              let payer = selectedPayer,
+              payer.userId?.isEmpty == false,
+              selectedParticipantIds.contains(payer.id),
+              !selectedParticipantIds.isEmpty,
               amount > 0 else {
             return false
         }
@@ -123,10 +155,16 @@ struct AddExpenseView: View {
     }
 
     private func toggleParticipant(_ participant: Person) {
-        if selectedParticipants.contains(participant) {
-            selectedParticipants.remove(participant)
+        HapticManager.impact(.light)
+        if selectedPayer?.id == participant.id {
+            selectedParticipantIds.insert(participant.id)
+            return
+        }
+
+        if selectedParticipantIds.contains(participant.id) {
+            selectedParticipantIds.remove(participant.id)
         } else {
-            selectedParticipants.insert(participant)
+            selectedParticipantIds.insert(participant.id)
         }
     }
 
@@ -134,7 +172,13 @@ struct AddExpenseView: View {
         guard let amount = Decimal(string: amountText),
               !title.isEmpty,
               let payer = selectedPayer,
-              !selectedParticipants.isEmpty else { return }
+              payer.userId?.isEmpty == false else { return }
+
+        selectedParticipantIds.insert(payer.id)
+        let selectedParticipants = registeredParticipants.filter { selectedParticipantIds.contains($0.id) }
+        guard !selectedParticipants.isEmpty else { return }
+
+        HapticManager.notificationOccurred(.success)
 
         let expense = Expense(
             id: existingId ?? UUID(),

@@ -53,7 +53,11 @@ struct Expense: Identifiable, Codable {
         self.title = response.title
         self.amount = response.totalAmount
         self.payer = participants.first { $0.userId == response.payerId } ?? Person(name: response.payer.displayName ?? "Unknown", userId: response.payerId)
-        self.participants = participants
+        let splitUserIds = Set(response.splits.map(\.userId))
+        self.participants = participants.filter { person in
+            guard let userId = person.userId else { return false }
+            return splitUserIds.contains(userId)
+        }
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
         self.note = response.note
         self.expenseDate = response.expenseDate

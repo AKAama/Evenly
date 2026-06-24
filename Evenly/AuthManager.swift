@@ -150,7 +150,7 @@ class AuthManager: ObservableObject {
         Task {
             do {
                 // Build form data
-                var formFields: [String: String] = [
+                let formFields: [String: String] = [
                     "email": email,
                     "password": password,
                     "code": verificationCode,
@@ -252,7 +252,7 @@ class AuthManager: ObservableObject {
     // MARK: - Update Profile
 
     func updateAvatar(_ imageData: Data, completion: @escaping (Error?) -> Void) {
-        guard let user = user else {
+        guard user != nil else {
             completion(NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"]))
             return
         }
@@ -313,6 +313,22 @@ class AuthManager: ObservableObject {
 
             } catch {
                 completion(error)
+            }
+        }
+    }
+
+    func changePassword(oldPassword: String, newPassword: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let passwordChange = PasswordChange(oldPassword: oldPassword, newPassword: newPassword)
+                let _: MessageResponse = try await api.put(APIEndpoints.changePassword, body: passwordChange)
+                await MainActor.run {
+                    completion(nil)
+                }
+            } catch {
+                await MainActor.run {
+                    completion(error)
+                }
             }
         }
     }

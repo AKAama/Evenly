@@ -17,7 +17,6 @@ struct LedgerDrawerView: View {
     @State private var ledgerToDelete: Ledger?
     
     let showingAddLedger: () -> Void
-    let editingLedger: (Ledger) -> Void
     
     private var filteredLedgers: [Ledger] {
         if searchText.isEmpty {
@@ -165,15 +164,6 @@ struct LedgerDrawerView: View {
             ledgerStore.setCurrentLedger(ledger)
             dismiss()
         }
-        .swipeActions(edge: .leading) {
-            Button {
-                HapticManager.impact(.medium)
-                editingLedger(ledger)
-            } label: {
-                Label("编辑", systemImage: "pencil")
-            }
-            .tint(.orange)
-        }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 HapticManager.notificationOccurred(.warning)
@@ -190,15 +180,6 @@ struct LedgerDrawerView: View {
                 Label("设为当前", systemImage: "checkmark.circle")
             }
             
-            Button {
-                HapticManager.impact(.medium)
-                editingLedger(ledger)
-            } label: {
-                Label("编辑", systemImage: "pencil")
-            }
-            
-            Divider()
-            
             Button(role: .destructive) {
                 HapticManager.notificationOccurred(.warning)
                 ledgerToDelete = ledger
@@ -213,8 +194,7 @@ struct LedgerDrawerView: View {
 
 #Preview {
     LedgerDrawerView(
-        showingAddLedger: {},
-        editingLedger: { _ in }
+        showingAddLedger: {}
     )
     .environmentObject(LedgerStore())
 }

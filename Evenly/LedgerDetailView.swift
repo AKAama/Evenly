@@ -13,8 +13,6 @@ struct LedgerDetailView: View {
     let ledgerId: UUID
     @EnvironmentObject var store: LedgerStore
     @State private var showingAddExpense = false
-    @State private var showingEditExpense = false
-    @State private var editingExpense: Expense?
     @State private var showingDeleteLedgerAlert = false
     @State private var searchText = ""
     
@@ -161,22 +159,10 @@ struct LedgerDetailView: View {
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     HapticManager.notificationOccurred(.warning)
-                                    var updated = ledger
-                                    updated.expenses.removeAll { $0.id == expense.id }
-                                    store.updateLedger(updated)
+                                    store.deleteExpense(expense, from: ledger) { _ in }
                                 } label: {
                                     Label("删除", systemImage: "trash")
                                 }
-                            }
-                            .swipeActions(edge: .leading) {
-                                Button {
-                                    HapticManager.impact(.medium)
-                                    editingExpense = expense
-                                    showingEditExpense = true
-                                } label: {
-                                    Label("编辑", systemImage: "pencil")
-                                }
-                                .tint(.blue)
                             }
                             .listRowAnimation()
                         }
@@ -265,27 +251,13 @@ struct LedgerDetailView: View {
         .sheet(isPresented: $showingAddExpense) {
             if let ledger = ledger {
                 AddExpenseView(participants: ledger.participants) { newExpense in
-                if !newExpense.title.isEmpty {
-                    var updatedLedger = ledger
-                    updatedLedger.expenses.append(newExpense)
-                    store.updateLedger(updatedLedger)
-                }
-                showingAddExpense = false
-            }
-            }
-        }
-        .sheet(isPresented: $showingEditExpense) {
-            if let ledger = ledger, let expense = editingExpense {
-                AddExpenseView(expense: expense, participants: ledger.participants) { updatedExpense in
-                    if !updatedExpense.title.isEmpty {
-                        var updatedLedger = ledger
-                        if let index = updatedLedger.expenses.firstIndex(where: { $0.id == updatedExpense.id }) {
-                            updatedLedger.expenses[index] = updatedExpense
-                            store.updateLedger(updatedLedger)
+                    if !newExpense.title.isEmpty {
+                        store.addExpense(newExpense, to: ledger) { result in
+                            if case .success = result {
+                                showingAddExpense = false
+                            }
                         }
                     }
-                    showingEditExpense = false
-                    editingExpense = nil
                 }
             }
         }

@@ -172,7 +172,7 @@ struct AddMemberView: View {
                         } header: {
                             Text("临时成员名字")
                         } footer: {
-                            Text("临时成员只能在本地使用，无法登录系统")
+                            Text("临时成员会保存到当前账本，但无法登录系统")
                         }
                     }
                     .navigationTitle("添加临时成员")
@@ -232,13 +232,7 @@ struct AddMemberView: View {
 
             Button(role: .destructive) {
                 HapticManager.notificationOccurred(.warning)
-                if var updatedLedger = ledgerStore.ledgers.first(where: { $0.id == ledger.id }) {
-                    updatedLedger.participants.removeAll { $0.id == participant.id }
-                    if let userId = participant.userId {
-                        updatedLedger.memberIds.removeAll { $0 == userId }
-                    }
-                    ledgerStore.updateLedger(updatedLedger)
-                }
+                deleteMember(participant)
             } label: {
                 Image(systemName: "trash")
                     .foregroundStyle(.red)
@@ -443,16 +437,15 @@ struct AddMemberView: View {
     }
 
     private func deleteMember(_ member: Person) {
-        guard let userId = member.userId else {
-            // For temporary members without userId, just update locally
-            if var updatedLedger = ledgerStore.ledgers.first(where: { $0.id == ledger.id }) {
-                updatedLedger.participants.removeAll { $0.id == member.id }
-                ledgerStore.updateLedger(updatedLedger)
+        let memberIdentifier = member.userId ?? member.id.uuidString
+        ledgerStore.removeMember(memberIdentifier, from: ledger) { result in
+            switch result {
+            case .success:
+                successMessage = "成员已删除"
+            case .failure(let error):
+                errorMessage = error.localizedDescription
             }
-            return
         }
-
-        ledgerStore.removeMember(userId, from: ledger) { _ in }
     }
 }
 

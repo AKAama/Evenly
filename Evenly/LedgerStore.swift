@@ -222,11 +222,6 @@ final class LedgerStore: ObservableObject {
         }
     }
 
-    func updateLedger(_ ledger: Ledger, completion: @escaping (Error?) -> Void = { _ in }) {
-        // The backend doesn't have an update endpoint, so we skip this
-        completion(nil)
-    }
-
     func deleteLedger(_ ledger: Ledger, completion: @escaping (Error?) -> Void = { _ in }) {
         Task {
             do {
@@ -310,6 +305,32 @@ final class LedgerStore: ObservableObject {
                     completion(.success(updatedLedger))
                 }
 
+            } catch {
+                await MainActor.run {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func leaveLedger(_ ledger: Ledger, completion: @escaping (Result<Void, Error>) -> Void) {
+        Task {
+            do {
+                try await api.delete(APIEndpoints.leaveLedger(ledgerId: ledger.id.uuidString))
+
+                await MainActor.run {
+                    self.ledgers.removeAll { $0.id == ledger.id }
+                    if self.currentLedger?.id == ledger.id {
+                        self.currentLedger = self.ledgers.first
+                        if let currentLedger {
+                            UserDefaults.standard.set(currentLedger.id.uuidString, forKey: self.userDefaultsKey)
+                            self.fetchLedgerDetails(ledgerId: currentLedger.id)
+                        } else {
+                            UserDefaults.standard.removeObject(forKey: self.userDefaultsKey)
+                        }
+                    }
+                    completion(.success(()))
+                }
             } catch {
                 await MainActor.run {
                     completion(.failure(error))
@@ -407,6 +428,45 @@ final class LedgerStore: ObservableObject {
         }
     }
 
+    func respondToExpense(_ expense: Expense, status: ConfirmationStatus, in ledger: Ledger, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard status == .confirmed || status == .rejected else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "无效的确认状态"])))
+            return
+        }
+
+        Task {
+            do {
+                let request = ConfirmExpenseRequest(status: status.rawValue)
+                let response: ExpenseResponse = try await api.post(
+                    APIEndpoints.confirmExpense(expenseId: expense.id.uuidString),
+                    body: request
+                )
+
+                await MainActor.run {
+                    if var updatedLedger = self.ledgers.first(where: { $0.id == ledger.id }),
+                       let expenseIndex = updatedLedger.expenses.firstIndex(where: { $0.id == expense.id }) {
+                        updatedLedger.expenses[expenseIndex].status = ExpenseStatus(rawValue: response.status) ?? updatedLedger.expenses[expenseIndex].status
+                        if let userId = self.userId {
+                            updatedLedger.expenses[expenseIndex].confirmations[userId] = status
+                        }
+
+                        if let ledgerIndex = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
+                            self.ledgers[ledgerIndex] = updatedLedger
+                        }
+                        if self.currentLedger?.id == ledger.id {
+                            self.currentLedger = updatedLedger
+                        }
+                    }
+                    completion(.success(()))
+                }
+            } catch {
+                await MainActor.run {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - Settlement Operations
 
     func fetchSettlements(for ledger: Ledger, completion: @escaping (Result<[Settlement], Error>) -> Void) {
@@ -419,6 +479,22 @@ final class LedgerStore: ObservableObject {
                     completion(.success(settlements))
                 }
 
+            } catch {
+                await MainActor.run {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func fetchSettlementHistory(for ledger: Ledger, completion: @escaping (Result<[SettlementHistory], Error>) -> Void) {
+        Task {
+            do {
+                let responses: [SettlementWithUsers] = try await api.get(APIEndpoints.settlementHistory(ledgerId: ledger.id.uuidString))
+
+                await MainActor.run {
+                    completion(.success(responses.map { SettlementHistory(from: $0) }))
+                }
             } catch {
                 await MainActor.run {
                     completion(.failure(error))

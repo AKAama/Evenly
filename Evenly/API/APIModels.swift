@@ -7,6 +7,19 @@
 
 import Foundation
 
+extension KeyedDecodingContainer {
+    func decodeFlexibleDecimal(forKey key: Key) throws -> Decimal {
+        if let decimal = try? decode(Decimal.self, forKey: key) {
+            return decimal
+        }
+        let string = try decode(String.self, forKey: key)
+        if let decimal = Decimal(string: string) {
+            return decimal
+        }
+        throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Invalid decimal value: \(string)")
+    }
+}
+
 // MARK: - Auth Models
 
 struct LoginRequest: Encodable {
@@ -94,6 +107,10 @@ struct PasswordChange: Encodable {
         case oldPassword = "old_password"
         case newPassword = "new_password"
     }
+}
+
+struct MessageResponse: Decodable {
+    let message: String
 }
 
 // MARK: - Ledger Models
@@ -275,6 +292,21 @@ struct ExpenseResponse: Decodable, Identifiable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        ledgerId = try container.decode(String.self, forKey: .ledgerId)
+        payerId = try container.decode(String.self, forKey: .payerId)
+        createdBy = try container.decode(String.self, forKey: .createdBy)
+        title = try container.decode(String.self, forKey: .title)
+        totalAmount = try container.decodeFlexibleDecimal(forKey: .totalAmount)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        expenseDate = try container.decodeIfPresent(Date.self, forKey: .expenseDate)
+        status = try container.decode(String.self, forKey: .status)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+    }
 }
 
 struct ExpenseWithDetails: Decodable, Identifiable {
@@ -309,6 +341,24 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         case splits
         case confirmations
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        ledgerId = try container.decode(String.self, forKey: .ledgerId)
+        payerId = try container.decode(String.self, forKey: .payerId)
+        createdBy = try container.decode(String.self, forKey: .createdBy)
+        title = try container.decode(String.self, forKey: .title)
+        totalAmount = try container.decodeFlexibleDecimal(forKey: .totalAmount)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        expenseDate = try container.decodeIfPresent(Date.self, forKey: .expenseDate)
+        status = try container.decode(String.self, forKey: .status)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        payer = try container.decode(UserResponse.self, forKey: .payer)
+        splits = try container.decode([ExpenseSplitResponse].self, forKey: .splits)
+        confirmations = try container.decode([ExpenseConfirmationResponse].self, forKey: .confirmations)
+    }
 }
 
 struct ExpenseSplitResponse: Decodable, Identifiable {
@@ -324,6 +374,15 @@ struct ExpenseSplitResponse: Decodable, Identifiable {
         case userId = "user_id"
         case amount
         case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        expenseId = try container.decode(String.self, forKey: .expenseId)
+        userId = try container.decode(String.self, forKey: .userId)
+        amount = try container.decodeFlexibleDecimal(forKey: .amount)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
     }
 }
 
@@ -381,6 +440,17 @@ struct SettlementResponse: Decodable, Identifiable {
         case note
         case settledAt = "settled_at"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        ledgerId = try container.decode(String.self, forKey: .ledgerId)
+        fromUserId = try container.decode(String.self, forKey: .fromUserId)
+        toUserId = try container.decode(String.self, forKey: .toUserId)
+        amount = try container.decodeFlexibleDecimal(forKey: .amount)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        settledAt = try container.decodeIfPresent(Date.self, forKey: .settledAt)
+    }
 }
 
 struct SettlementInstruction: Decodable, Identifiable {
@@ -398,6 +468,15 @@ struct SettlementInstruction: Decodable, Identifiable {
         case toUserId = "to_user_id"
         case toUserName = "to_user_name"
         case amount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fromUserId = try container.decode(String.self, forKey: .fromUserId)
+        fromUserName = try container.decode(String.self, forKey: .fromUserName)
+        toUserId = try container.decode(String.self, forKey: .toUserId)
+        toUserName = try container.decode(String.self, forKey: .toUserName)
+        amount = try container.decodeFlexibleDecimal(forKey: .amount)
     }
 }
 
@@ -422,5 +501,18 @@ struct SettlementWithUsers: Decodable, Identifiable {
         case settledAt = "settled_at"
         case fromUser = "from_user"
         case toUser = "to_user"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        ledgerId = try container.decode(String.self, forKey: .ledgerId)
+        fromUserId = try container.decode(String.self, forKey: .fromUserId)
+        toUserId = try container.decode(String.self, forKey: .toUserId)
+        amount = try container.decodeFlexibleDecimal(forKey: .amount)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        settledAt = try container.decodeIfPresent(Date.self, forKey: .settledAt)
+        fromUser = try container.decode(UserResponse.self, forKey: .fromUser)
+        toUser = try container.decode(UserResponse.self, forKey: .toUser)
     }
 }

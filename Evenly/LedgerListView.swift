@@ -12,7 +12,6 @@ struct LedgerListView: View {
     @EnvironmentObject var store: LedgerStore
     
     @State private var searchText = ""
-    @State private var selectedLedger: Ledger?
     @State private var showingDeleteAlert = false
     @State private var ledgerToDelete: Ledger?
     
@@ -40,13 +39,6 @@ struct LedgerListView: View {
                     }
                 }
                 .contextMenu {
-                    Button {
-                        HapticManager.impact(.medium)
-                        selectedLedger = ledger
-                    } label: {
-                        Label("编辑", systemImage: "pencil")
-                    }
-                    
                     Button {
                         HapticManager.impact(.medium)
                         UIPasteboard.general.string = ledger.title

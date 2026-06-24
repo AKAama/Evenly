@@ -16,12 +16,19 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var expenseToDelete: Expense?
+    @State private var settlementSuggestions: [Settlement] = []
+    @State private var settlementHistory: [SettlementHistory] = []
+    @State private var isLoadingSettlementData = false
+    @State private var settlementError: String?
+    @State private var settlementActionIds: Set<String> = []
+    @State private var respondingExpenseIds: Set<UUID> = []
+    @State private var actionError: String?
+    @State private var showingLeaveLedgerAlert = false
     
     enum SheetType: Identifiable {
         case ledgerDrawer
         case addLedger
         case addExpense
-        case editLedger(Ledger)
         case memberManagement(Ledger)
 
         var id: String {
@@ -29,7 +36,6 @@ struct ContentView: View {
             case .ledgerDrawer: return "ledgerDrawer"
             case .addLedger: return "addLedger"
             case .addExpense: return "addExpense"
-            case .editLedger(let ledger): return "editLedger-\(ledger.id.uuidString)"
             case .memberManagement(let ledger): return "memberMgmt-\(ledger.id.uuidString)"
             }
         }
@@ -70,8 +76,7 @@ struct ContentView: View {
             switch item {
             case .ledgerDrawer:
                 LedgerDrawerView(
-                    showingAddLedger: { sheetType = .addLedger },
-                    editingLedger: { ledger in sheetType = .editLedger(ledger) }
+                    showingAddLedger: { sheetType = .addLedger }
                 )
                 .environmentObject(auth)
                 .environmentObject(ledgerStore)
@@ -97,22 +102,28 @@ struct ContentView: View {
                     }
                 }
 
-            case .editLedger(let ledger):
-                AddLedgerView(ledger: ledger) { updated in
-                    if !updated.title.isEmpty {
-                        var merged = updated
-                        merged.expenses = ledger.expenses
-                        ledgerStore.updateLedger(merged)
-                    }
-                    sheetType = nil
-                }
-                .environmentObject(ledgerStore)
-                .environmentObject(auth)
-
             case .memberManagement(let ledger):
                 AddMemberView(ledger: ledger)
                     .environmentObject(ledgerStore)
             }
+        }
+        .alert("操作失败", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("确定", role: .cancel) {}
+        } message: {
+            Text(actionError ?? "")
+        }
+        .alert("退出账本", isPresented: $showingLeaveLedgerAlert) {
+            Button("取消", role: .cancel) {}
+            Button("退出", role: .destructive) {
+                if let ledger = ledgerStore.currentLedger {
+                    leaveLedger(ledger)
+                }
+            }
+        } message: {
+            Text("退出后将无法继续查看该账本。")
         }
     }
 
@@ -161,6 +172,19 @@ struct ContentView: View {
                             }
                         } label: {
                             Label("管理成员", systemImage: "person.badge.plus")
+                        }
+
+                        if let currentLedger = ledgerStore.currentLedger,
+                           let userId = auth.user?.id,
+                           currentLedger.ownerId != userId {
+                            Divider()
+
+                            Button(role: .destructive) {
+                                HapticManager.notificationOccurred(.warning)
+                                showingLeaveLedgerAlert = true
+                            } label: {
+                                Label("退出账本", systemImage: "rectangle.portrait.and.arrow.right")
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -227,7 +251,7 @@ struct ContentView: View {
                     .padding(.vertical, 30)
                 } else {
                     ForEach(filteredExpenses) { expense in
-                        expenseRowView(expense)
+                        expenseRowView(expense, ledger: ledger)
                             .listRowAnimation()
                     }
 	                    .onDelete { indexSet in
@@ -281,8 +305,16 @@ struct ContentView: View {
             }
 
             Section {
-                let transfers = calculateTransfers(for: ledger)
-                if transfers.isEmpty {
+                if isLoadingSettlementData {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                } else if let settlementError {
+                    Label(settlementError, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                } else if settlementSuggestions.isEmpty {
                     HStack {
                         Image(systemName: "checkmark.circle")
                             .foregroundStyle(.green)
@@ -290,67 +322,145 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    ForEach(transfers) { transfer in
+                    ForEach(settlementSuggestions) { settlement in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(transfer.from.name)
+                                Text(settlement.fromUserName)
                                     .font(.subheadline)
                                 Image(systemName: "arrow.right")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                Text(transfer.to.name)
+                                Text(settlement.toUserName)
                                     .font(.subheadline)
                             }
                             .frame(width: 80)
                             
                             Spacer()
                             
-                            Text(formatAmount(transfer.amount))
+                            Text(formatAmount(settlement.amount))
                                 .font(.headline)
                                 .foregroundStyle(.orange)
+
+                            Button {
+                                recordSettlement(settlement, in: ledger)
+                            } label: {
+                                if settlementActionIds.contains(settlement.id) {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "checkmark.circle")
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(settlementActionIds.contains(settlement.id))
                         }
                     }
                 }
             } header: {
                 Text("结算方案")
             }
+
+            Section {
+                if settlementHistory.isEmpty {
+                    Text("暂无结算记录")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(settlementHistory) { settlement in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(settlement.fromUserName) → \(settlement.toUserName)")
+                                    .font(.subheadline)
+                                if let settledAt = settlement.settledAt {
+                                    Text(formatDate(settledAt))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Text(formatAmount(settlement.amount))
+                                .font(.headline)
+                        }
+                    }
+                }
+            } header: {
+                Text("结算记录")
+            }
 	        }
 	        .listStyle(.insetGrouped)
 	        .scrollDismissesKeyboard(.interactively)
+            .onAppear {
+                loadSettlementData(for: ledger)
+            }
+            .onChange(of: ledger.id) { _, _ in
+                loadSettlementData(for: ledger)
+            }
 	    }
 
-    private func expenseRowView(_ expense: Expense) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                Image(systemName: "yensign.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.blue)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(expense.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .dynamicTypeSize(.accessibility2)
-                
-                HStack(spacing: 8) {
-                    Label(expense.payer.name, systemImage: "person")
-                    if expense.participants.count > 1 {
-                        Label("\(expense.participants.count)人分摊", systemImage: "person.2")
-                    }
+    private func expenseRowView(_ expense: Expense, ledger: Ledger) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.15))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "yensign.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(expense.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .dynamicTypeSize(.accessibility2)
+                    
+                    HStack(spacing: 8) {
+                        Label(expense.payer.name, systemImage: "person")
+                        if expense.participants.count > 1 {
+                            Label("\(expense.participants.count)人分摊", systemImage: "person.2")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(formatAmount(expense.amount))
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    expenseStatusLabel(expense)
+                }
             }
-            
-            Spacer()
-            
-            Text(formatAmount(expense.amount))
-                .font(.headline)
-                .foregroundStyle(.primary)
+
+            if canRespond(to: expense) {
+                HStack {
+                    Spacer()
+                    Button {
+                        respond(to: expense, with: .rejected, in: ledger)
+                    } label: {
+                        Label("拒绝", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(respondingExpenseIds.contains(expense.id))
+
+                    Button {
+                        respond(to: expense, with: .confirmed, in: ledger)
+                    } label: {
+                        if respondingExpenseIds.contains(expense.id) {
+                            ProgressView()
+                        } else {
+                            Label("确认", systemImage: "checkmark.circle")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(respondingExpenseIds.contains(expense.id))
+                }
+            } else if let userStatus = currentUserConfirmationStatus(for: expense), expense.status == .pending {
+                Label(userStatus == .confirmed ? "你已确认" : "你已拒绝", systemImage: userStatus == .confirmed ? "checkmark.circle" : "xmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(userStatus == .confirmed ? .green : .red)
+            }
         }
         .padding(.vertical, 6)
     }
@@ -370,6 +480,116 @@ struct ContentView: View {
     private func isZero(_ amount: Decimal) -> Bool {
         let value = NSDecimalNumber(decimal: amount).doubleValue
         return abs(value) < 0.0001
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    @ViewBuilder
+    private func expenseStatusLabel(_ expense: Expense) -> some View {
+        switch expense.status {
+        case .pending:
+            Label("待确认", systemImage: "hourglass")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        case .confirmed:
+            Label("已确认", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .rejected:
+            Label("已拒绝", systemImage: "xmark.circle")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func canRespond(to expense: Expense) -> Bool {
+        guard expense.status == .pending,
+              let userId = auth.user?.id,
+              expense.participants.contains(where: { $0.userId == userId }) else {
+            return false
+        }
+        return expense.confirmations[userId] == nil
+    }
+
+    private func currentUserConfirmationStatus(for expense: Expense) -> ConfirmationStatus? {
+        guard let userId = auth.user?.id else { return nil }
+        return expense.confirmations[userId]
+    }
+
+    private func respond(to expense: Expense, with status: ConfirmationStatus, in ledger: Ledger) {
+        respondingExpenseIds.insert(expense.id)
+        ledgerStore.respondToExpense(expense, status: status, in: ledger) { result in
+            respondingExpenseIds.remove(expense.id)
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+                loadSettlementData(for: ledger)
+            case .failure(let error):
+                HapticManager.notificationOccurred(.error)
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadSettlementData(for ledger: Ledger) {
+        isLoadingSettlementData = true
+        settlementError = nil
+
+        ledgerStore.fetchSettlements(for: ledger) { result in
+            switch result {
+            case .success(let settlements):
+                settlementSuggestions = settlements
+            case .failure(let error):
+                settlementError = error.localizedDescription
+            }
+
+            ledgerStore.fetchSettlementHistory(for: ledger) { historyResult in
+                isLoadingSettlementData = false
+                switch historyResult {
+                case .success(let history):
+                    settlementHistory = history
+                case .failure(let error):
+                    settlementError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func recordSettlement(_ settlement: Settlement, in ledger: Ledger) {
+        settlementActionIds.insert(settlement.id)
+        ledgerStore.createSettlement(
+            from: settlement.fromUserId,
+            to: settlement.toUserId,
+            amount: settlement.amount,
+            for: ledger
+        ) { result in
+            settlementActionIds.remove(settlement.id)
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+                loadSettlementData(for: ledger)
+            case .failure(let error):
+                HapticManager.notificationOccurred(.error)
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func leaveLedger(_ ledger: Ledger) {
+        ledgerStore.leaveLedger(ledger) { result in
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+            case .failure(let error):
+                HapticManager.notificationOccurred(.error)
+                actionError = error.localizedDescription
+            }
+        }
     }
 
     private func calculateBalanceResults(for ledger: Ledger) -> [BalanceResult] {

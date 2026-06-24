@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var isLoading = false
+    @State private var showingChangePassword = false
 
     var body: some View {
         NavigationStack {
@@ -54,9 +55,9 @@ struct SettingsView: View {
                         
                         Button {
                             HapticManager.impact(.medium)
-                            showUnsupportedFeature("密码重置功能需要后端接口上线后启用。")
+                            showingChangePassword = true
                         } label: {
-                            Label("重置密码", systemImage: "lock.rotation")
+                            Label("修改密码", systemImage: "lock.rotation")
                         }
                         .disabled(isLoading)
                     } header: {
@@ -135,6 +136,10 @@ struct SettingsView: View {
             } message: {
                 Text(alertMessage)
             }
+            .sheet(isPresented: $showingChangePassword) {
+                ChangePasswordView()
+                    .environmentObject(auth)
+            }
         }
     }
 
@@ -169,6 +174,95 @@ struct SettingsView: View {
                 alertTitle = "错误"
                 alertMessage = error.localizedDescription
                 showingResetPasswordAlert = true
+            }
+        }
+    }
+}
+
+struct ChangePasswordView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) var dismiss
+    @State private var oldPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+
+    private var canSubmit: Bool {
+        !oldPassword.isEmpty &&
+        newPassword.count >= 6 &&
+        newPassword == confirmPassword &&
+        !isLoading
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("当前密码") {
+                    SecureField("输入当前密码", text: $oldPassword)
+                        .textContentType(.password)
+                }
+
+                Section("新密码") {
+                    SecureField("输入新密码", text: $newPassword)
+                        .textContentType(.newPassword)
+                    SecureField("再次输入新密码", text: $confirmPassword)
+                        .textContentType(.newPassword)
+
+                    if !confirmPassword.isEmpty && newPassword != confirmPassword {
+                        Text("两次输入的新密码不一致")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if !newPassword.isEmpty && newPassword.count < 6 {
+                        Text("新密码至少 6 位")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("修改密码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        submit()
+                    } label: {
+                        if isLoading {
+                            ProgressView()
+                        } else {
+                            Text("保存")
+                        }
+                    }
+                    .disabled(!canSubmit)
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        isLoading = true
+        errorMessage = nil
+
+        auth.changePassword(oldPassword: oldPassword, newPassword: newPassword) { error in
+            isLoading = false
+            if let error {
+                HapticManager.notificationOccurred(.error)
+                errorMessage = error.localizedDescription
+            } else {
+                HapticManager.notificationOccurred(.success)
+                dismiss()
             }
         }
     }

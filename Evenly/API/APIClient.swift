@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import Security
 
 enum APIError: LocalizedError {
     case invalidURL
@@ -45,7 +46,7 @@ final class APIClient: ObservableObject {
         }
 
         #if DEBUG
-        return "http://192.168.124.14:8000"
+        return "http://localhost:8000"
         #else
         return "https://evenly.ismyh.cn"
         #endif
@@ -54,6 +55,7 @@ final class APIClient: ObservableObject {
     @Published private(set) var isAuthenticated = false
     private var token: String?
     private let tokenKey = "JWT_Token"
+    private let tokenStore = KeychainTokenStore(service: "cn.evenly.api")
 
     private let session: URLSession
     private var cancellables = Set<AnyCancellable>()
@@ -71,7 +73,11 @@ final class APIClient: ObservableObject {
             seconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
             seconds.locale = Locale(identifier: "en_US_POSIX")
 
-            if let date = fractional.date(from: value) ?? seconds.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
+            let dateOnly = DateFormatter()
+            dateOnly.dateFormat = "yyyy-MM-dd"
+            dateOnly.locale = Locale(identifier: "en_US_POSIX")
+
+            if let date = fractional.date(from: value) ?? seconds.date(from: value) ?? dateOnly.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
                 return date
             }
 
@@ -86,8 +92,12 @@ final class APIClient: ObservableObject {
         config.timeoutIntervalForResource = 60
         self.session = URLSession(configuration: config)
 
-        // Load token from UserDefaults
-        self.token = UserDefaults.standard.string(forKey: tokenKey)
+        self.token = tokenStore.readToken(account: tokenKey)
+        if token == nil, let legacyToken = UserDefaults.standard.string(forKey: tokenKey) {
+            token = legacyToken
+            tokenStore.saveToken(legacyToken, account: tokenKey)
+            UserDefaults.standard.removeObject(forKey: tokenKey)
+        }
         self.isAuthenticated = token != nil
     }
 
@@ -96,8 +106,9 @@ final class APIClient: ObservableObject {
     func setToken(_ newToken: String?) {
         token = newToken
         if let token = token {
-            UserDefaults.standard.set(token, forKey: tokenKey)
+            tokenStore.saveToken(token, account: tokenKey)
         } else {
+            tokenStore.deleteToken(account: tokenKey)
             UserDefaults.standard.removeObject(forKey: tokenKey)
         }
         isAuthenticated = token != nil
@@ -162,6 +173,10 @@ final class APIClient: ObservableObject {
 
             switch httpResponse.statusCode {
             case 200...299:
+                if data.isEmpty, T.self == EmptyResponse.self {
+                    return EmptyResponse() as! T
+                }
+
                 do {
                     return try Self.jsonDecoder.decode(T.self, from: data)
                 } catch {
@@ -299,11 +314,57 @@ struct FileUpload {
     let data: Data
 }
 
-struct FormDataBody {
+struct FormDataBody: Encodable {
     let data: Data
 }
 
 struct EmptyResponse: Decodable {}
+
+final class KeychainTokenStore {
+    private let service: String
+
+    init(service: String) {
+        self.service = service
+    }
+
+    func readToken(account: String) -> String? {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    func saveToken(_ token: String, account: String) {
+        let data = Data(token.utf8)
+        var query = baseQuery(account: account)
+        let attributes = [kSecValueData as String: data]
+
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            query[kSecValueData as String] = data
+            SecItemAdd(query as CFDictionary, nil)
+        }
+    }
+
+    func deleteToken(account: String) {
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
+    }
+
+    private func baseQuery(account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+    }
+}
 
 struct FormDataBuilder {
     private var fields: [String: String] = [:]

@@ -15,9 +15,10 @@ struct AddExpenseView: View {
     @State private var selectedPayer: Person?
     @State private var selectedParticipantIds: Set<UUID> = []
     @State private var isSaving = false
+    @State private var errorMessage: String?
 
     let participants: [Person]
-    var onSave: (Expense) -> Void
+    var onSave: (Expense) async -> Bool
     private let existingId: UUID?
     private var registeredParticipants: [Person] {
         participants.filter { participant in
@@ -25,7 +26,7 @@ struct AddExpenseView: View {
         }
     }
 
-    init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) -> Void) {
+    init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) async -> Bool) {
         self.participants = participants
         self.onSave = onSave
         self.existingId = expense?.id
@@ -109,6 +110,14 @@ struct AddExpenseView: View {
                         }
                     }
                 }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.subheadline)
+                    }
+                }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedParticipantIds.count)
             .navigationTitle(existingId == nil ? "新建账单" : "编辑账单")
@@ -120,10 +129,15 @@ struct AddExpenseView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
+                    Button {
                         saveExpense()
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text("保存").fontWeight(.semibold)
+                        }
                     }
-                    .fontWeight(.semibold)
                     .disabled(!canSave || isSaving)
                 }
             }
@@ -178,7 +192,8 @@ struct AddExpenseView: View {
         let selectedParticipants = registeredParticipants.filter { selectedParticipantIds.contains($0.id) }
         guard !selectedParticipants.isEmpty else { return }
 
-        HapticManager.notificationOccurred(.success)
+        errorMessage = nil
+        isSaving = true
 
         let expense = Expense(
             id: existingId ?? UUID(),
@@ -187,8 +202,20 @@ struct AddExpenseView: View {
             payer: payer,
             participants: Array(selectedParticipants)
         )
-        onSave(expense)
-        dismiss()
+
+        Task {
+            let success = await onSave(expense)
+            await MainActor.run {
+                isSaving = false
+                if success {
+                    HapticManager.notificationOccurred(.success)
+                    dismiss()
+                } else {
+                    HapticManager.notificationOccurred(.error)
+                    errorMessage = "保存失败，请检查网络或成员权限后重试"
+                }
+            }
+        }
     }
 
     private func formatAmountInput(_ input: String) -> String {
@@ -226,5 +253,5 @@ struct AddExpenseView: View {
         Person(name: "张三"),
         Person(name: "李四"),
         Person(name: "王五")
-    ]) { _ in }
+    ]) { _ in true }
 }

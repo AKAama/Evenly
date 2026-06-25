@@ -6,6 +6,23 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		17E0E80A2EEEE54E009BD9E7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17E0E7EE2EEEE54D009BD9E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 17E0E7F52EEEE54D009BD9E7;
+			remoteInfo = Evenly;
+		};
+		17E0E80B2EEEE54E009BD9E7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 17E0E7EE2EEEE54D009BD9E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 17E0E7F52EEEE54D009BD9E7;
+			remoteInfo = Evenly;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		17E0E7F62EEEE54D009BD9E7 /* Evenly.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Evenly.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		17E0E8042EEEE54E009BD9E7 /* EvenlyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EvenlyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -76,23 +93,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
-
-/* Begin PBXContainerItemProxy section */
-		17E0E80A2EEEE54E009BD9E7 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 17E0E7EE2EEEE54D009BD9E7 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 17E0E7F52EEEE54D009BD9E7;
-			remoteInfo = Evenly;
-		};
-		17E0E80B2EEEE54E009BD9E7 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 17E0E7EE2EEEE54D009BD9E7 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 17E0E7F52EEEE54D009BD9E7;
-			remoteInfo = Evenly;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXNativeTarget section */
 		17E0E7F52EEEE54D009BD9E7 /* Evenly */ = {
@@ -400,13 +400,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = KN6BTC248F;
-					ENABLE_PREVIEWS = YES;
-					EVENLY_API_BASE_URL = "http://localhost:8000";
-					GENERATE_INFOPLIST_FILE = YES;
-					INFOPLIST_KEY_EVENLY_API_BASE_URL = "$(EVENLY_API_BASE_URL)";
-					INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KN6BTC248F;
+				ENABLE_PREVIEWS = YES;
+				EVENLY_API_BASE_URL = "http://localhost:8000";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_EVENLY_API_BASE_URL = "$(EVENLY_API_BASE_URL)";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -435,14 +435,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = KN6BTC248F;
-					ENABLE_PREVIEWS = YES;
-					EVENLY_API_BASE_URL = "https://evenly.ismyh.cn";
-					GENERATE_INFOPLIST_FILE = NO;
-					INFOPLIST_FILE = Info.plist;
-					INFOPLIST_KEY_EVENLY_API_BASE_URL = "$(EVENLY_API_BASE_URL)";
-					INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KN6BTC248F;
+				ENABLE_PREVIEWS = YES;
+				EVENLY_API_BASE_URL = "https://evenly.ismyh.cn/api";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_EVENLY_API_BASE_URL = "$(EVENLY_API_BASE_URL)";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

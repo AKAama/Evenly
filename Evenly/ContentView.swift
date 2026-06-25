@@ -91,12 +91,15 @@ struct ContentView: View {
             case .addExpense:
                 if let ledger = ledgerStore.currentLedger {
                     AddExpenseView(participants: ledger.participants) { newExpense in
-                        ledgerStore.addExpense(newExpense, to: ledger) { result in
-                            switch result {
-                            case .success:
-                                sheetType = nil
-                            case .failure(let error):
-                                print("Failed to add expense: \(error)")
+                        await withCheckedContinuation { continuation in
+                            ledgerStore.addExpense(newExpense, to: ledger) { result in
+                                switch result {
+                                case .success:
+                                    continuation.resume(returning: true)
+                                case .failure(let error):
+                                    print("Failed to add expense: \(error)")
+                                    continuation.resume(returning: false)
+                                }
                             }
                         }
                     }
@@ -267,44 +270,6 @@ struct ContentView: View {
             }
 
             Section {
-                let results = calculateBalanceResults(for: ledger)
-                if results.isEmpty {
-                    Text("暂无参与者")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(results) { result in
-                        HStack {
-                            ZStack {
-                                Circle()
-                                    .fill(result.isPositive ? Color.green.opacity(0.2) : (result.balance < 0 ? Color.red.opacity(0.2) : Color.gray.opacity(0.2)))
-                                    .frame(width: 36, height: 36)
-                                Text(String(result.person.name.prefix(1)))
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(result.isPositive ? .green : (result.balance < 0 ? .red : .primary))
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(result.person.name)
-                                    .font(.subheadline)
-                                Text(result.displayText)
-                                    .font(.caption)
-                            }
-                            
-                            Spacer()
-                            
-                            Text(formatAmount(result.balance))
-                                .font(.headline)
-                                .foregroundStyle(result.isPositive ? .green : (result.balance < 0 ? .red : .secondary))
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            } header: {
-                Text("分账结果")
-            }
-
-            Section {
                 if isLoadingSettlementData {
                     HStack {
                         Spacer()
@@ -314,49 +279,41 @@ struct ContentView: View {
                 } else if let settlementError {
                     Label(settlementError, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
-                } else if settlementSuggestions.isEmpty {
-                    HStack {
-                        Image(systemName: "checkmark.circle")
-                            .foregroundStyle(.green)
-                        Text("账目已结清")
-                            .foregroundStyle(.secondary)
-                    }
                 } else {
-                    ForEach(settlementSuggestions) { settlement in
+                    let mine = mySettlements(in: ledger)
+                    if mine.isEmpty {
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(settlement.fromUserName)
-                                    .font(.subheadline)
-                                Image(systemName: "arrow.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text(settlement.toUserName)
-                                    .font(.subheadline)
-                            }
-                            .frame(width: 80)
-                            
-                            Spacer()
-                            
-                            Text(formatAmount(settlement.amount))
-                                .font(.headline)
-                                .foregroundStyle(.orange)
-
-                            Button {
-                                recordSettlement(settlement, in: ledger)
-                            } label: {
-                                if settlementActionIds.contains(settlement.id) {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "checkmark.circle")
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(settlementActionIds.contains(settlement.id))
+                            Image(systemName: "checkmark.circle")
+                                .foregroundStyle(.green)
+                            Text("账目已结清，你无需转账")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ForEach(mine) { settlement in
+                            mySettlementRow(settlement, ledger: ledger)
                         }
                     }
                 }
             } header: {
-                Text("结算方案")
+                Text("我的结算")
+            } footer: {
+                Text("仅展示与你相关的转账，点击右侧标记已结")
+            }
+
+            Section {
+                NavigationLink {
+                    SettlementDetailView(
+                        ledger: ledger,
+                        balanceResults: calculateBalanceResults(for: ledger),
+                        suggestions: settlementSuggestions,
+                        actionIds: settlementActionIds,
+                        onRecordSettlement: { settlement in
+                            recordSettlement(settlement, in: ledger)
+                        }
+                    )
+                } label: {
+                    Label("查看分账明细", systemImage: "list.bullet.rectangle.portrait")
+                }
             }
 
             Section {
@@ -558,6 +515,56 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// 与当前用户相关的结算:我需转给别人的 + 别人需转给我的
+    private func mySettlements(in ledger: Ledger) -> [Settlement] {
+        guard let me = auth.user?.id else { return [] }
+        return settlementSuggestions.filter { $0.fromUserId == me || $0.toUserId == me }
+    }
+
+    @ViewBuilder
+    private func mySettlementRow(_ settlement: Settlement, ledger: Ledger) -> some View {
+        let me = auth.user?.id
+        let iOwe = settlement.fromUserId == me
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(iOwe ? Color.orange.opacity(0.2) : Color.green.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                Image(systemName: iOwe ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                    .foregroundStyle(iOwe ? .orange : .green)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                if iOwe {
+                    Text("我需转给 \(settlement.toUserName)")
+                        .font(.subheadline)
+                } else {
+                    Text("\(settlement.fromUserName) 需转给我")
+                        .font(.subheadline)
+                }
+            }
+
+            Spacer()
+
+            Text(formatAmount(settlement.amount))
+                .font(.headline)
+                .foregroundStyle(iOwe ? .orange : .green)
+
+            Button {
+                recordSettlement(settlement, in: ledger)
+            } label: {
+                if settlementActionIds.contains(settlement.id) {
+                    ProgressView()
+                } else {
+                    Image(systemName: "checkmark.circle")
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(settlementActionIds.contains(settlement.id))
+        }
+        .padding(.vertical, 2)
     }
 
     private func recordSettlement(_ settlement: Settlement, in ledger: Ledger) {

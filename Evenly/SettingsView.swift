@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import PhotosUI
 
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthManager
@@ -14,6 +15,8 @@ struct SettingsView: View {
     @State private var alertMessage = ""
     @State private var isLoading = false
     @State private var showingChangePassword = false
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var isUploadingAvatar = false
 
     var body: some View {
         NavigationStack {
@@ -21,17 +24,29 @@ struct SettingsView: View {
                 if let user = auth.user {
                     Section {
                         HStack(spacing: 16) {
-                            if let avatarImage = auth.userProfile?.avatarImage {
-                                Image(uiImage: avatarImage)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 60, height: 60)
-                                    .clipShape(Circle())
-                            } else {
-                                Image(systemName: "person.circle.fill")
-                                    .font(.system(size: 60))
-                                    .foregroundStyle(.secondary)
+                            PhotosPicker(selection: $avatarItem, matching: .images) {
+                                ZStack {
+                                    if let avatarImage = auth.userProfile?.avatarImage {
+                                        Image(uiImage: avatarImage)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 60, height: 60)
+                                            .clipShape(Circle())
+                                    } else {
+                                        Image(systemName: "person.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if isUploadingAvatar {
+                                        Circle()
+                                            .fill(.black.opacity(0.35))
+                                            .frame(width: 60, height: 60)
+                                        ProgressView()
+                                            .tint(.white)
+                                    }
+                                }
                             }
+                            .disabled(isUploadingAvatar)
 
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
@@ -42,9 +57,15 @@ struct SettingsView: View {
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
+                                Text(isUploadingAvatar ? "上传中..." : "点击更换头像")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                         .padding(.vertical, 8)
+                        .onChange(of: avatarItem) { _, newItem in
+                            handleAvatarSelection(newItem)
+                        }
                         
                         HStack {
                             Label("邮箱", systemImage: "envelope")
@@ -141,6 +162,60 @@ struct SettingsView: View {
                     .environmentObject(auth)
             }
         }
+    }
+
+    private func handleAvatarSelection(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        isUploadingAvatar = true
+        HapticManager.impact(.medium)
+        item.loadTransferable(type: Data.self) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    guard let data, let image = UIImage(data: data) else {
+                        isUploadingAvatar = false
+                        showAlert(title: "上传失败", message: "无法读取所选图片")
+                        return
+                    }
+                    uploadAvatar(image: image)
+                case .failure:
+                    isUploadingAvatar = false
+                    showAlert(title: "上传失败", message: "图片加载失败,请重试")
+                }
+            }
+        }
+    }
+
+    private func uploadAvatar(image: UIImage) {
+        // 缩放到最长边 512,再压缩为 JPEG 控制体积
+        let maxDimension: CGFloat = 512
+        let scale = min(maxDimension / image.size.width, maxDimension / image.size.height, 1)
+        let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let scaled = UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        let jpegData = scaled.jpegData(compressionQuality: 0.8) ?? Data()
+
+        auth.updateAvatar(jpegData) { error in
+            DispatchQueue.main.async {
+                isUploadingAvatar = false
+                avatarItem = nil
+                if let error {
+                    showAlert(title: "上传失败", message: error.localizedDescription)
+                } else {
+                    HapticManager.notificationOccurred(.success)
+                    showAlert(title: "已更新", message: "头像更换成功")
+                }
+            }
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        alertTitle = title
+        alertMessage = message
+        showingResetPasswordAlert = true
     }
 
     private func showUnsupportedFeature(_ message: String) {

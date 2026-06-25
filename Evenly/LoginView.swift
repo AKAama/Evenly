@@ -10,6 +10,8 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject var auth: AuthManager
     @State private var isShowingRegister = false
+    @FocusState private var loginIdentifierFocused: Bool
+    @FocusState private var loginPasswordFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -22,6 +24,7 @@ struct LoginView: View {
     }
 
     private var loginView: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             dismissKeyboardGesture
             VStack(spacing: 32) {
@@ -55,14 +58,18 @@ struct LoginView: View {
                     CustomTextField(
                         icon: "envelope.fill",
                         placeholder: "邮箱",
-                        text: $auth.loginIdentifier
+                        text: $auth.loginIdentifier,
+                        isFocusedBinding: $loginIdentifierFocused
                     )
+                    .id("loginIdentifier")
 
                     CustomSecureField(
                         icon: "lock.fill",
                         placeholder: "密码",
-                        text: $auth.loginPassword
+                        text: $auth.loginPassword,
+                        isFocusedBinding: $loginPasswordFocused
                     )
+                    .id("loginPassword")
 
                     if let error = auth.loginError {
                         HStack {
@@ -128,6 +135,13 @@ struct LoginView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: loginIdentifierFocused) { _, focused in
+            if focused { withAnimation { proxy.scrollTo("loginIdentifier", anchor: .bottom) } }
+        }
+        .onChange(of: loginPasswordFocused) { _, focused in
+            if focused { withAnimation { proxy.scrollTo("loginPassword", anchor: .bottom) } }
+        }
+        }
         .navigationBarHidden(true)
     }
 
@@ -159,8 +173,14 @@ struct RegisterView: View {
     @State private var usernameChecked = false
     @State private var isCheckingUsername = false
     @State private var codeSent = false
+    @FocusState private var focusedField: RegisterField?
+
+    enum RegisterField: Hashable {
+        case username, email, code, password, confirmPassword
+    }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             dismissKeyboardGesture
             VStack(spacing: 24) {
@@ -189,6 +209,7 @@ struct RegisterView: View {
                             TextField("用户名", text: $username)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .focused($focusedField, equals: .username)
                                 .onChange(of: username) { _, newValue in
                                     usernameChecked = false
                                 }
@@ -196,6 +217,7 @@ struct RegisterView: View {
                         .padding()
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
+                        .id(RegisterField.username)
 
                         if !username.isEmpty && !auth.isValidUsername(username) {
                             Text("用户名必须以英文开头，可包含英文、数字、下划线，至少3位")
@@ -221,10 +243,12 @@ struct RegisterView: View {
                                 .keyboardType(.emailAddress)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .focused($focusedField, equals: .email)
                         }
                         .padding()
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
+                        .id(RegisterField.email)
 
                         if !email.isEmpty && !auth.isValidEmail(email) {
                             Text("请输入有效的邮箱地址")
@@ -264,10 +288,12 @@ struct RegisterView: View {
                                     .foregroundStyle(.secondary)
                                 TextField("验证码", text: $auth.verificationCode)
                                     .keyboardType(.numberPad)
+                                    .focused($focusedField, equals: .code)
                             }
                             .padding()
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(8)
+                            .id(RegisterField.code)
                         }
                     }
 
@@ -277,10 +303,12 @@ struct RegisterView: View {
                             Image(systemName: "lock.fill")
                                 .foregroundStyle(.secondary)
                             SecureField("密码", text: $password)
+                                .focused($focusedField, equals: .password)
                         }
                         .padding()
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
+                        .id(RegisterField.password)
 
                         if password.count > 0 && password.count < 6 {
                             Text("密码至少6位")
@@ -295,10 +323,12 @@ struct RegisterView: View {
                             Image(systemName: "lock.fill")
                                 .foregroundStyle(.secondary)
                             SecureField("确认密码", text: $confirmPassword)
+                                .focused($focusedField, equals: .confirmPassword)
                         }
                         .padding()
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
+                        .id(RegisterField.confirmPassword)
 
                         if !confirmPassword.isEmpty && password != confirmPassword {
                             Text("两次输入的密码不一致")
@@ -348,6 +378,11 @@ struct RegisterView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: focusedField) { _, field in
+            guard let field else { return }
+            withAnimation { proxy.scrollTo(field, anchor: .bottom) }
+        }
+        }
         .navigationTitle("注册")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -401,7 +436,8 @@ struct CustomTextField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
-    
+    var isFocusedBinding: FocusState<Bool>.Binding?
+
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -409,11 +445,12 @@ struct CustomTextField: View {
             Image(systemName: icon)
                 .foregroundStyle(isFocused ? .blue : .secondary)
                 .frame(width: 20)
-            
+
             TextField(placeholder, text: $text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($isFocused)
+                .focused(isFocusedBinding)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -432,6 +469,7 @@ struct CustomSecureField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
+    var isFocusedBinding: FocusState<Bool>.Binding?
     @State private var isPasswordVisible = false
     @FocusState private var isFocused: Bool
 
@@ -440,17 +478,19 @@ struct CustomSecureField: View {
             Image(systemName: icon)
                 .foregroundStyle(isFocused ? .blue : .secondary)
                 .frame(width: 20)
-            
+
             if isPasswordVisible {
                 TextField(placeholder, text: $text)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .focused($isFocused)
+                    .focused(isFocusedBinding)
             } else {
                 SecureField(placeholder, text: $text)
                     .focused($isFocused)
+                    .focused(isFocusedBinding)
             }
-            
+
             Button {
                 isPasswordVisible.toggle()
             } label: {

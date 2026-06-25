@@ -251,10 +251,14 @@ struct LedgerDetailView: View {
         .sheet(isPresented: $showingAddExpense) {
             if let ledger = ledger {
                 AddExpenseView(participants: ledger.participants) { newExpense in
-                    if !newExpense.title.isEmpty {
+                    guard !newExpense.title.isEmpty else { return false }
+                    return await withCheckedContinuation { continuation in
                         store.addExpense(newExpense, to: ledger) { result in
-                            if case .success = result {
-                                showingAddExpense = false
+                            switch result {
+                            case .success:
+                                continuation.resume(returning: true)
+                            case .failure:
+                                continuation.resume(returning: false)
                             }
                         }
                     }

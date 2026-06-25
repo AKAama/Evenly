@@ -134,7 +134,6 @@ struct AddMemberView: View {
             }
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
-            .searchable(text: $searchText, prompt: "搜索成员")
             .navigationTitle("成员管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -292,7 +291,7 @@ struct AddMemberView: View {
                             .foregroundStyle(.green)
                     }
                 } else {
-                    Text("未找到用户")
+                    Text("未找到「\(result.query)」")
                         .font(.body)
                     HStack(spacing: 4) {
                         Image(systemName: "questionmark.circle.fill")

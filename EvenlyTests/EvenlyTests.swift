@@ -73,4 +73,26 @@ final class EvenlyTests: XCTestCase {
 
         XCTAssertEqual(error.localizedDescription, "Payer must be a registered ledger member")
     }
+
+    func testLocalLedgerParticipantBecomesTemporaryPerson() {
+        let participant = AddLedgerView.ParticipantInfo(name: "Stella", status: .local)
+
+        XCTAssertTrue(participant.person.isTemporary)
+        XCTAssertNil(participant.person.userId)
+    }
+
+    func testMemberSearchFiltersAlreadySelectedUsers() {
+        let selected = AddLedgerView.ParticipantInfo(
+            name: "Stella",
+            status: .found(userId: "user-1", name: "Stella")
+        )
+        let results = [
+            UserResponse(id: "user-1", email: "stella@example.com", displayName: "Stella", avatarUrl: nil, createdAt: nil),
+            UserResponse(id: "user-2", email: "tristan@example.com", displayName: "Tristan", avatarUrl: nil, createdAt: nil)
+        ]
+
+        let filtered = AddLedgerView.filteredSearchResults(results, excluding: [selected])
+
+        XCTAssertEqual(filtered.map(\.id), ["user-2"])
+    }
 }

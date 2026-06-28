@@ -8,12 +8,12 @@ struct AddLedgerView: View {
     @State private var participantInput: String = ""
     @State private var participants: [ParticipantInfo] = []
     @State private var errorMessage: String?
-    @State private var isAddingParticipant = false
+    @State private var searchResults: [UserResponse] = []
+    @State private var isSearching = false
+    @State private var completedSearchQuery = ""
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var showSaveError = false
-    @State private var showAddTemporaryPrompt = false
-    @State private var pendingEmailForTemporary: String = ""
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -36,6 +36,24 @@ struct AddLedgerView: View {
             case notFound
             case local
         }
+
+        var person: Person {
+            if case .found(let userId, _) = status {
+                return Person(name: name, userId: userId)
+            }
+            return Person(name: name, isTemporary: true)
+        }
+    }
+
+    static func filteredSearchResults(
+        _ results: [UserResponse],
+        excluding participants: [ParticipantInfo]
+    ) -> [UserResponse] {
+        let selectedUserIds = Set(participants.compactMap { participant -> String? in
+            guard case .found(let userId, _) = participant.status else { return nil }
+            return userId
+        })
+        return results.filter { !selectedUserIds.contains($0.id) }
     }
 
     init(ledger: Ledger? = nil, onSave: @escaping (Ledger) -> Void) {
@@ -68,25 +86,45 @@ struct AddLedgerView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 24)
                         
-	                        TextField("输入邮箱或名字搜索", text: $participantInput)
-	                            .textInputAutocapitalization(.never)
-	                            .autocorrectionDisabled()
-	                            .focused($focusedField, equals: .participant)
-                            .onSubmit {
-                                addParticipant()
-                            }
+	                    TextField("输入邮箱或名字搜索", text: $participantInput)
+	                        .textInputAutocapitalization(.never)
+	                        .autocorrectionDisabled()
+	                        .focused($focusedField, equals: .participant)
 
-                        if isAddingParticipant {
+                        if isSearching {
                             ProgressView()
-                        } else {
-                            Button {
-                                HapticManager.impact(.light)
-                                addParticipant()
-                            } label: {
-                                Text("添加")
-                                    .fontWeight(.medium)
+                        }
+                    }
+
+                    ForEach(searchResults) { user in
+                        Button {
+                            selectUser(user)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "person.crop.circle")
+                                    .font(.title2)
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户")
+                                        .foregroundStyle(.primary)
+                                    Text(user.email)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundStyle(.blue)
                             }
-                            .disabled(participantInput.isEmpty)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if shouldOfferTemporaryMember {
+                        Button {
+                            addTemporaryParticipant()
+                        } label: {
+                            Label("将「\(trimmedParticipantInput)」添加为临时成员", systemImage: "person.crop.circle.badge.plus")
+                                .foregroundStyle(.orange)
                         }
                     }
 
@@ -117,6 +155,9 @@ struct AddLedgerView: View {
             }
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
+            .task(id: participantInput) {
+                await searchParticipants()
+            }
             .navigationTitle(existingLedger == nil ? "新建账本" : "编辑账本")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -148,20 +189,6 @@ struct AddLedgerView: View {
                 Button("确定", role: .cancel) {}
             } message: {
                 Text(saveError ?? "未知错误")
-            }
-            .alert("添加为临时用户？", isPresented: $showAddTemporaryPrompt) {
-                Button("添加") {
-                    // 用户确认添加为临时用户
-                    let participant = ParticipantInfo(name: pendingEmailForTemporary, status: .notFound, isLoading: false)
-                    self.participants.append(participant)
-                    self.participantInput = ""
-                }
-                Button("取消", role: .cancel) {
-                    self.participantInput = ""
-                    self.pendingEmailForTemporary = ""
-                }
-            } message: {
-                Text("该邮箱 \(pendingEmailForTemporary) 未注册，是否添加为临时成员？")
             }
         }
     }
@@ -247,77 +274,63 @@ struct AddLedgerView: View {
         !title.isEmpty
     }
 
-    private func addParticipant() {
-        let input = participantInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty else { return }
+    private var trimmedParticipantInput: String {
+        participantInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
+    private var shouldOfferTemporaryMember: Bool {
+        let query = trimmedParticipantInput
+        return query.count >= 2
+            && completedSearchQuery == query
+            && searchResults.isEmpty
+            && !participants.contains { $0.name.caseInsensitiveCompare(query) == .orderedSame }
+    }
+
+    @MainActor
+    private func searchParticipants() async {
+        let query = trimmedParticipantInput
         errorMessage = nil
+        completedSearchQuery = ""
+        searchResults = []
 
-        if auth.isValidEmail(input) {
-            checkUserExistsByEmail(input)
-        } else {
-            // 本地参与者：检查名字是否重复
-            if participants.contains(where: { $0.name.lowercased() == input.lowercased() }) {
-                errorMessage = "该参与者已添加"
-                return
-            }
-            let participant = ParticipantInfo(name: input, status: .local)
-            participants.append(participant)
-            participantInput = ""
+        guard query.count >= 2 else {
+            isSearching = false
+            return
+        }
+
+        isSearching = true
+        do {
+            try await Task.sleep(nanoseconds: 300_000_000)
+            let users: [UserResponse] = try await APIClient.shared.get(APIEndpoints.searchUsers(q: query, limit: 5))
+            try Task.checkCancellation()
+            searchResults = Self.filteredSearchResults(users, excluding: participants)
+            completedSearchQuery = query
+            isSearching = false
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            isSearching = false
+            completedSearchQuery = query
+            errorMessage = error.localizedDescription
         }
     }
 
-    private func checkUserExistsByEmail(_ email: String) {
-        isAddingParticipant = true
-
-        Task {
-            do {
-                let users: [UserResponse] = try await APIClient.shared.get(APIEndpoints.searchUsers(q: email))
-
-                await MainActor.run {
-                    self.isAddingParticipant = false
-                    self.participantInput = ""
-
-                    if let user = users.first(where: { $0.email.lowercased() == email.lowercased() }) ?? users.first {
-                        let displayName = user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户"
-
-                        // 检查该用户是否已添加
-                        if self.isUserAlreadyAdded(userId: user.id) {
-                            self.errorMessage = "该用户已添加 (\(displayName))"
-                        } else {
-                            let participant = ParticipantInfo(
-                                name: displayName,
-                                status: .found(userId: user.id, name: displayName),
-                                isLoading: false
-                            )
-                            self.participants.append(participant)
-                        }
-                    } else {
-                        // 用户未注册，弹窗询问是否添加为临时用户
-                        if self.participants.contains(where: { $0.name.lowercased() == email.lowercased() }) {
-                            self.errorMessage = "该参与者已添加"
-                        } else {
-                            self.pendingEmailForTemporary = email
-                            self.showAddTemporaryPrompt = true
-                        }
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.isAddingParticipant = false
-                    self.errorMessage = "查询失败，请重试"
-                }
-            }
-        }
+    private func selectUser(_ user: UserResponse) {
+        let displayName = user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户"
+        participants.append(ParticipantInfo(name: displayName, status: .found(userId: user.id, name: displayName)))
+        participantInput = ""
+        searchResults = []
+        completedSearchQuery = ""
+        HapticManager.impact(.light)
     }
 
-    private func isUserAlreadyAdded(userId: String) -> Bool {
-        participants.contains { participant in
-            if case .found(let existingUserId, _) = participant.status {
-                return existingUserId == userId
-            }
-            return false
-        }
+    private func addTemporaryParticipant() {
+        participants.append(ParticipantInfo(name: trimmedParticipantInput, status: .local))
+        participantInput = ""
+        searchResults = []
+        completedSearchQuery = ""
+        HapticManager.impact(.light)
     }
 
     private func saveLedger() {
@@ -327,14 +340,7 @@ struct AddLedgerView: View {
 
         isSaving = true
 
-        // 转换为 Person 数组
-        let persons = participants.map { participant -> Person in
-            if case .found(let userId, _) = participant.status {
-                return Person(name: participant.name, userId: userId)
-            } else {
-                return Person(name: participant.name, userId: nil)
-            }
-        }
+        let persons = participants.map(\.person)
 
         let ledger = Ledger(
             id: existingLedger?.id ?? UUID(),
@@ -352,20 +358,19 @@ struct AddLedgerView: View {
             dismiss()
         } else {
             // 创建模式
-            ledgerStore.createLedger(ledger) { error in
+            ledgerStore.createLedger(ledger) { result in
                 DispatchQueue.main.async {
                     self.isSaving = false
 
-                    if let error = error {
+                    switch result {
+                    case .failure(let error):
                         self.saveError = error.localizedDescription
                         self.showSaveError = true
                         HapticManager.notificationOccurred(.error)
-                        return
+                    case .success(let createdLedger):
+                        self.onSave?(createdLedger)
+                        self.dismiss()
                     }
-
-                    // 保存成功，自动关闭页面
-                    self.onSave?(ledger)
-                    self.dismiss()
                 }
             }
         }

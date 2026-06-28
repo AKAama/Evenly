@@ -171,15 +171,15 @@ final class LedgerStore: ObservableObject {
 
     // MARK: - Ledger Operations
 
-    func createLedger(_ ledger: Ledger, completion: @escaping (Error?) -> Void) {
+    func createLedger(_ ledger: Ledger, completion: @escaping (Result<Ledger, Error>) -> Void) {
         guard userId != nil else {
-            completion(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"]))
+            completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
             return
         }
 
         // 检查是否存在同名账本
         if ledgers.contains(where: { $0.title.lowercased() == ledger.title.lowercased() }) {
-            completion(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "已存在同名账本"]))
+            completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "已存在同名账本"])))
             return
         }
 
@@ -214,21 +214,21 @@ final class LedgerStore: ObservableObject {
 
                 let response: LedgerWithMembers = try await api.post(APIEndpoints.ledgers, body: createRequest)
 
+                let newLedger = Ledger(from: response)
                 await MainActor.run {
-                    let newLedger = Ledger(from: response)
                     self.ledgers.append(newLedger)
                     self.currentLedger = newLedger
                     UserDefaults.standard.set(newLedger.id.uuidString, forKey: self.userDefaultsKey)
                     self.isLoading = false
                 }
-                completion(nil)
+                completion(.success(newLedger))
 
             } catch {
                 await MainActor.run {
                     self.error = error.localizedDescription
                     self.isLoading = false
                 }
-                completion(error)
+                completion(.failure(error))
             }
         }
     }

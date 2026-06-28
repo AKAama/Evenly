@@ -7,11 +7,15 @@
 
 import SwiftUI
 
+private enum LoginField: Hashable {
+    case identifier
+    case password
+}
+
 struct LoginView: View {
     @EnvironmentObject var auth: AuthManager
     @State private var isShowingRegister = false
-    @FocusState private var loginIdentifierFocused: Bool
-    @FocusState private var loginPasswordFocused: Bool
+    @FocusState private var focusedField: LoginField?
 
     var body: some View {
         NavigationStack {
@@ -25,124 +29,129 @@ struct LoginView: View {
 
     private var loginView: some View {
         ScrollViewReader { proxy in
-        ScrollView {
-            dismissKeyboardGesture
-            VStack(spacing: 32) {
-                Spacer().frame(height: 60)
+            ScrollView {
+                VStack(spacing: 32) {
+                    Spacer().frame(height: 60)
 
-                // App Logo
-                ZStack {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(Color.blue.opacity(0.12))
+                    Image("LoginLogo")
+                        .resizable()
+                        .scaledToFit()
                         .frame(width: 96, height: 96)
-                    
-                    Image(systemName: "equal.circle.fill")
-                        .font(.system(size: 54, weight: .semibold))
-                        .foregroundStyle(.blue)
-                }
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .accessibilityLabel("Evenly 图标")
+                        .accessibilityIdentifier("login-logo")
 
-                VStack(spacing: 8) {
-                    Text("Evenly")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-                    
-                    Text("轻松分摊，愉快记账")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                    VStack(spacing: 8) {
+                        Text("Evenly")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.primary)
 
-                Spacer().frame(height: 32)
-
-                VStack(spacing: 16) {
-                    CustomTextField(
-                        icon: "envelope.fill",
-                        placeholder: "邮箱",
-                        text: $auth.loginIdentifier,
-                        isFocusedBinding: $loginIdentifierFocused
-                    )
-                    .id("loginIdentifier")
-
-                    CustomSecureField(
-                        icon: "lock.fill",
-                        placeholder: "密码",
-                        text: $auth.loginPassword,
-                        isFocusedBinding: $loginPasswordFocused
-                    )
-                    .id("loginPassword")
-
-                    if let error = auth.loginError {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                        .multilineTextAlignment(.center)
+                        Text("轻松分摊，愉快记账")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
+
+                    Spacer().frame(height: 32)
+
+                    VStack(spacing: 16) {
+                        CustomTextField(
+                            icon: "envelope.fill",
+                            placeholder: "邮箱",
+                            text: $auth.loginIdentifier,
+                            focusedField: $focusedField,
+                            field: .identifier
+                        )
+                        .keyboardType(.emailAddress)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
+                        .accessibilityIdentifier("login-email")
+                        .id(LoginField.identifier)
+
+                        CustomSecureField(
+                            icon: "lock.fill",
+                            placeholder: "密码",
+                            text: $auth.loginPassword,
+                            focusedField: $focusedField,
+                            field: .password
+                        )
+                        .submitLabel(.go)
+                        .onSubmit { submitLogin() }
+                        .accessibilityIdentifier("login-password")
+                        .id(LoginField.password)
+
+                        if let error = auth.loginError {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            .multilineTextAlignment(.center)
+                        }
+
+                        Button(action: submitLogin) {
+                            HStack {
+                                if auth.isLoading {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Text("登录")
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty ? Color.gray : Color.blue)
+                            )
+                            .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.spring(.medium))
+                        .disabled(auth.isLoading || auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty)
+                    }
+                    .padding(.horizontal, 24)
+
+                    Spacer().frame(height: 24)
 
                     Button {
-                        HapticManager.impact(.medium)
-                        auth.signIn(identifier: auth.loginIdentifier, password: auth.loginPassword) { error in
-                            if let error = error {
-                                auth.loginError = error.localizedDescription
-                                HapticManager.notificationOccurred(.error)
-                            } else {
-                                HapticManager.notificationOccurred(.success)
-                            }
-                        }
+                        HapticManager.impact(.light)
+                        isShowingRegister = true
                     } label: {
                         HStack {
-                            if auth.isLoading {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("登录")
+                            Text("还没有账号？")
+                                .foregroundStyle(.secondary)
+                            Text("立即注册")
                                     .fontWeight(.semibold)
-                            }
+                                    .foregroundStyle(.blue)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty ? Color.gray : Color.blue)
-                        )
-                        .foregroundStyle(.white)
+                        .font(.subheadline)
                     }
-                    .buttonStyle(.spring(.medium))
-                    .disabled(auth.isLoading || auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty)
+
+                    Spacer()
                 }
-                .padding(.horizontal, 24)
-
-                Spacer().frame(height: 24)
-
-                Button {
-                    HapticManager.impact(.light)
-                    isShowingRegister = true
-                } label: {
-                    HStack {
-                        Text("还没有账号？")
-                            .foregroundStyle(.secondary)
-                        Text("立即注册")
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.blue)
-                    }
-                    .font(.subheadline)
+                .frame(maxWidth: .infinity, minHeight: 700)
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = nil }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: focusedField) { _, field in
+                guard let field else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    withAnimation { proxy.scrollTo(field, anchor: .center) }
                 }
-
-                Spacer()
             }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .onChange(of: loginIdentifierFocused) { _, focused in
-            if focused { withAnimation { proxy.scrollTo("loginIdentifier", anchor: .bottom) } }
-        }
-        .onChange(of: loginPasswordFocused) { _, focused in
-            if focused { withAnimation { proxy.scrollTo("loginPassword", anchor: .bottom) } }
-        }
-        }
         .navigationBarHidden(true)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { focusedField = nil }
+            }
+        }
     }
 
     // 点击空白处收起键盘
@@ -156,6 +165,19 @@ struct LoginView: View {
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func submitLogin() {
+        focusedField = nil
+        HapticManager.impact(.medium)
+        auth.signIn(identifier: auth.loginIdentifier, password: auth.loginPassword) { error in
+            if let error {
+                auth.loginError = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
+            } else {
+                HapticManager.notificationOccurred(.success)
+            }
+        }
     }
 }
 
@@ -432,25 +454,23 @@ struct RegisterView: View {
 
 // MARK: - Custom Fields
 
-struct CustomTextField: View {
+private struct CustomTextField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
-    var isFocusedBinding: FocusState<Bool>.Binding?
-
-    @FocusState private var isFocused: Bool
+    let focusedField: FocusState<LoginField?>.Binding
+    let field: LoginField
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(isFocused ? .blue : .secondary)
+                .foregroundStyle(focusedField.wrappedValue == field ? .blue : .secondary)
                 .frame(width: 20)
 
             TextField(placeholder, text: $text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .focused($isFocused)
-                .focused(isFocusedBinding)
+                .focused(focusedField, equals: field)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -459,36 +479,34 @@ struct CustomTextField: View {
                 .fill(Color(.systemGray6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(isFocused ? Color.blue : Color.clear, lineWidth: 2)
+                        .stroke(focusedField.wrappedValue == field ? Color.blue : Color.clear, lineWidth: 2)
                 )
         )
     }
 }
 
-struct CustomSecureField: View {
+private struct CustomSecureField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
-    var isFocusedBinding: FocusState<Bool>.Binding?
+    let focusedField: FocusState<LoginField?>.Binding
+    let field: LoginField
     @State private var isPasswordVisible = false
-    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(isFocused ? .blue : .secondary)
+                .foregroundStyle(focusedField.wrappedValue == field ? .blue : .secondary)
                 .frame(width: 20)
 
             if isPasswordVisible {
                 TextField(placeholder, text: $text)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .focused($isFocused)
-                    .focused(isFocusedBinding)
+                    .focused(focusedField, equals: field)
             } else {
                 SecureField(placeholder, text: $text)
-                    .focused($isFocused)
-                    .focused(isFocusedBinding)
+                    .focused(focusedField, equals: field)
             }
 
             Button {
@@ -505,7 +523,7 @@ struct CustomSecureField: View {
                 .fill(Color(.systemGray6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(isFocused ? Color.blue : Color.clear, lineWidth: 2)
+                        .stroke(focusedField.wrappedValue == field ? Color.blue : Color.clear, lineWidth: 2)
                 )
         )
     }

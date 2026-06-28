@@ -27,6 +27,10 @@ class AuthManager: ObservableObject {
     private let api = APIClient.shared
 
     init() {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestingResetAuth") {
+            api.clearToken()
+        }
+
         // Try to restore session from stored token
         Task {
             await restoreSession()

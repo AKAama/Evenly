@@ -11,7 +11,12 @@ import SwiftUI
 struct AddMemberView: View {
     @EnvironmentObject var ledgerStore: LedgerStore
     @Environment(\.dismiss) var dismiss
-    let ledger: Ledger
+    let ledgerId: UUID
+
+    private var ledger: Ledger {
+        ledgerStore.ledger(id: ledgerId)
+            ?? Ledger(id: ledgerId, title: "", ownerId: "")
+    }
 
     @State private var searchText = ""
     @State private var isLoading = false
@@ -310,7 +315,10 @@ struct AddMemberView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if result.found, let userId = result.userId {
-                addRegisteredMember(userId: userId, email: result.email)
+                addRegisteredMember(
+                    userId: userId,
+                    displayName: result.displayName ?? result.email.components(separatedBy: "@").first
+                )
             } else if !result.found {
                 // 未找到用户时，弹窗询问是否添加为临时成员
                 temporaryName = result.email
@@ -373,11 +381,11 @@ struct AddMemberView: View {
         }
     }
 
-    private func addRegisteredMember(userId: String, email: String) {
+    private func addRegisteredMember(userId: String, displayName: String?) {
         isLoading = true
         errorMessage = nil
 
-        ledgerStore.addMember(byEmail: email, to: ledger) { result in
+        ledgerStore.addMember(userId: userId, nickname: displayName, to: ledger) { result in
             isLoading = false
 
             switch result {
@@ -594,11 +602,6 @@ struct MemberRowView: View {
 }
 
 #Preview {
-    AddMemberView(ledger: Ledger(
-        id: UUID(),
-        title: "测试账本",
-        ownerId: "owner123",
-        memberIds: ["member1", "member2"]
-    ))
+    AddMemberView(ledgerId: UUID())
     .environmentObject(LedgerStore())
 }

@@ -2,6 +2,8 @@ import XCTest
 @testable import Evenly
 
 final class EvenlyTests: XCTestCase {
+    private static var retainedStores: [LedgerStore] = []
+
     func testSanity() {
         XCTAssertEqual("Evenly", "Evenly")
     }
@@ -94,5 +96,21 @@ final class EvenlyTests: XCTestCase {
         let filtered = AddLedgerView.filteredSearchResults(results, excluding: [selected])
 
         XCTAssertEqual(filtered.map(\.id), ["user-2"])
+    }
+
+    @MainActor
+    func testApplyingLedgerUpdateImmediatelyExposesNewMemberByID() {
+        let ledgerId = UUID()
+        let store = LedgerStore()
+        Self.retainedStores.append(store)
+        store.applyUpdatedLedger(Ledger(id: ledgerId, title: "Trip", ownerId: "owner"))
+        let stella = Person(name: "Stella", userId: "user-1")
+
+        store.applyUpdatedLedger(
+            Ledger(id: ledgerId, title: "Trip", ownerId: "owner", participants: [stella])
+        )
+
+        XCTAssertEqual(store.ledger(id: ledgerId)?.participants, [stella])
+        XCTAssertEqual(store.ledger(id: ledgerId)?.memberCount, 1)
     }
 }

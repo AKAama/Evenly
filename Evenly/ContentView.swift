@@ -105,7 +105,7 @@ struct ContentView: View {
                 }
 
             case .memberManagement(let ledger):
-                AddMemberView(ledger: ledger)
+                AddMemberView(ledgerId: ledger.id)
                     .environmentObject(ledgerStore)
             }
         }

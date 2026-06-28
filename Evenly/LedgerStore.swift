@@ -142,6 +142,10 @@ final class LedgerStore: ObservableObject {
 
     // MARK: - Current Ledger
 
+    func ledger(id: UUID) -> Ledger? {
+        ledgers.first { $0.id == id }
+    }
+
     func setCurrentLedger(_ ledger: Ledger) {
         currentLedger = ledger
         UserDefaults.standard.set(ledger.id.uuidString, forKey: userDefaultsKey)
@@ -257,6 +261,41 @@ final class LedgerStore: ObservableObject {
 
     // MARK: - Member Management
 
+    func addMember(
+        userId: String,
+        nickname: String?,
+        to ledger: Ledger,
+        completion: @escaping (Result<Ledger, Error>) -> Void
+    ) {
+        Task {
+            do {
+                let addRequest = AddMemberRequest(
+                    userId: userId,
+                    nickname: nickname,
+                    isTemporary: false,
+                    temporaryName: nil
+                )
+                let _: MemberResponse = try await api.post(
+                    APIEndpoints.addMember(ledgerId: ledger.id.uuidString),
+                    body: addRequest
+                )
+                let response: LedgerWithMembers = try await api.get(
+                    APIEndpoints.ledger(id: ledger.id.uuidString)
+                )
+                let updatedLedger = Ledger(from: response)
+
+                await MainActor.run {
+                    self.applyUpdatedLedger(updatedLedger)
+                    completion(.success(updatedLedger))
+                }
+            } catch {
+                await MainActor.run {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     func addMember(byEmail email: String, to ledger: Ledger, completion: @escaping (Result<Ledger, Error>) -> Void) {
         // First, search for the user by email
         Task {
@@ -271,23 +310,7 @@ final class LedgerStore: ObservableObject {
                     return
                 }
 
-                // Add member to ledger
-                let addRequest = AddMemberRequest(userId: user.id, nickname: user.displayName, isTemporary: false, temporaryName: nil)
-                let _: MemberResponse = try await api.post(APIEndpoints.addMember(ledgerId: ledger.id.uuidString), body: addRequest)
-
-                // Fetch updated ledger
-                let response: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledger.id.uuidString))
-                let updatedLedger = Ledger(from: response)
-
-                await MainActor.run {
-                    if let index = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
-                        self.ledgers[index] = updatedLedger
-                    }
-                    if self.currentLedger?.id == ledger.id {
-                        self.currentLedger = updatedLedger
-                    }
-                    completion(.success(updatedLedger))
-                }
+                self.addMember(userId: user.id, nickname: user.displayName, to: ledger, completion: completion)
 
             } catch {
                 await MainActor.run {

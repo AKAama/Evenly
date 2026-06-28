@@ -20,6 +20,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>EVENLY_API_BASE_URL</key>
 	<string>$(EVENLY_API_BASE_URL)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于连接你在局域网运行的 Evenly 开发服务器</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

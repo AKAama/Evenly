@@ -12,6 +12,7 @@ import Combine
 class AuthManager: ObservableObject {
     @Published var user: UserResponse?
     @Published var userProfile: UserProfile?
+    @Published var avatarImage: UIImage?
 
     // Login/Register state
     @Published var loginIdentifier = ""
@@ -281,6 +282,7 @@ class AuthManager: ObservableObject {
 
                 await MainActor.run {
                     self.user = updatedUser
+                    self.avatarImage = UIImage(data: imageData)
                     self.userProfile = UserProfile(
                         id: updatedUser.id,
                         username: updatedUser.displayName,
@@ -288,11 +290,13 @@ class AuthManager: ObservableObject {
                         phone: self.userProfile?.phone,
                         avatarUrl: updatedUser.avatarUrl
                     )
+                    completion(nil)
                 }
-                completion(nil)
 
             } catch {
-                completion(error)
+                await MainActor.run {
+                    completion(error)
+                }
             }
         }
     }
@@ -343,6 +347,7 @@ class AuthManager: ObservableObject {
         api.clearToken()
         self.user = nil
         self.userProfile = nil
+        self.avatarImage = nil
     }
 
     // MARK: - Password Reset
@@ -404,7 +409,4 @@ struct UserProfile {
         username ?? email?.components(separatedBy: "@").first ?? "用户"
     }
 
-    var avatarImage: UIImage? {
-        nil // Will be loaded from URL
-    }
 }

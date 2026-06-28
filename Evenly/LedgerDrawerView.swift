@@ -97,17 +97,12 @@ struct LedgerDrawerView: View {
 
     private var userHeaderView: some View {
         HStack(spacing: 12) {
-            if let avatarImage = auth.userProfile?.avatarImage {
-                Image(uiImage: avatarImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 50, height: 50)
-                    .clipShape(Circle())
-            } else {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 50))
-                    .foregroundStyle(.secondary)
-            }
+            RemoteAvatarView(
+                avatarUrl: auth.userProfile?.avatarUrl,
+                localImage: auth.avatarImage,
+                fallbackText: auth.userProfile?.displayName ?? "用户",
+                size: 50
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(auth.userProfile?.displayName ?? "用户")

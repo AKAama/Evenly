@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var isLoading = false
     @State private var showingChangePassword = false
     @State private var avatarItem: PhotosPickerItem?
+    @State private var selectedAvatarImage: UIImage?
     @State private var isUploadingAvatar = false
 
     var body: some View {
@@ -26,17 +27,12 @@ struct SettingsView: View {
                         HStack(spacing: 16) {
                             PhotosPicker(selection: $avatarItem, matching: .images) {
                                 ZStack {
-                                    if let avatarImage = auth.userProfile?.avatarImage {
-                                        Image(uiImage: avatarImage)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 60, height: 60)
-                                            .clipShape(Circle())
-                                    } else {
-                                        Image(systemName: "person.circle.fill")
-                                            .font(.system(size: 60))
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    RemoteAvatarView(
+                                        avatarUrl: auth.userProfile?.avatarUrl,
+                                        localImage: selectedAvatarImage ?? auth.avatarImage,
+                                        fallbackText: auth.userProfile?.displayName ?? user.email,
+                                        size: 60
+                                    )
                                     if isUploadingAvatar {
                                         Circle()
                                             .fill(.black.opacity(0.35))
@@ -177,6 +173,7 @@ struct SettingsView: View {
                         showAlert(title: "上传失败", message: "无法读取所选图片")
                         return
                     }
+                    selectedAvatarImage = image
                     uploadAvatar(image: image)
                 case .failure:
                     isUploadingAvatar = false
@@ -203,8 +200,10 @@ struct SettingsView: View {
                 isUploadingAvatar = false
                 avatarItem = nil
                 if let error {
+                    selectedAvatarImage = nil
                     showAlert(title: "上传失败", message: error.localizedDescription)
                 } else {
+                    selectedAvatarImage = auth.avatarImage
                     HapticManager.notificationOccurred(.success)
                     showAlert(title: "已更新", message: "头像更换成功")
                 }

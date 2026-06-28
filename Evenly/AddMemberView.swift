@@ -248,36 +248,11 @@ struct AddMemberView: View {
     private func searchResultView(_ result: UserSearchResult) -> some View {
         HStack(spacing: 12) {
             // Avatar
-            ZStack {
-                if result.found, let avatarUrl = result.avatarUrl, let url = URL(string: avatarUrl) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        default:
-                            Circle().fill(Color.green.opacity(0.2))
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                } else if result.found {
-                    Circle()
-                        .fill(Color.green.opacity(0.2))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.title2)
-                } else {
-                    Circle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(width: 44, height: 44)
-                    Text(String(result.query.prefix(1)).uppercased())
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            RemoteAvatarView(
+                avatarUrl: result.found ? result.avatarUrl : nil,
+                fallbackText: result.displayName ?? result.email,
+                size: 44
+            )
             
             VStack(alignment: .leading, spacing: 2) {
                 if result.found {
@@ -538,25 +513,10 @@ struct MemberRowView: View {
     
     @ViewBuilder
     private var avatarView: some View {
-        if let avatarUrl = avatarUrl, let url = URL(string: avatarUrl) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-                case .failure:
-                    fallbackAvatar
-                case .empty:
-                    fallbackAvatar
-                @unknown default:
-                    fallbackAvatar
-                }
-            }
-        } else {
+        if isTemporary {
             fallbackAvatar
+        } else {
+            RemoteAvatarView(avatarUrl: avatarUrl, fallbackText: memberName, size: 40)
         }
     }
     

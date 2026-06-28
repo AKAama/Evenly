@@ -268,42 +268,34 @@ struct ContentView: View {
                 Text("账单")
             }
 
-            Section {
-                if isLoadingSettlementData {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                } else if let settlementError {
-                    Label(settlementError, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                } else {
-                    let mine = mySettlements(in: ledger)
-                    if mine.isEmpty {
+            let mine = mySettlements(in: ledger)
+            if isLoadingSettlementData || settlementError != nil || !mine.isEmpty {
+                Section {
+                    if isLoadingSettlementData {
                         HStack {
-                            Image(systemName: "checkmark.circle")
-                                .foregroundStyle(.green)
-                            Text("账目已结清，你无需转账")
-                                .foregroundStyle(.secondary)
+                            Spacer()
+                            ProgressView()
+                            Spacer()
                         }
+                    } else if let settlementError {
+                        Label(settlementError, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
                     } else {
                         ForEach(mine) { settlement in
                             mySettlementRow(settlement, ledger: ledger)
                         }
                     }
+                } header: {
+                    Text("我的结算")
+                } footer: {
+                    Text("仅展示与你相关的转账，点击右侧标记已结")
                 }
-            } header: {
-                Text("我的结算")
-            } footer: {
-                Text("仅展示与你相关的转账，点击右侧标记已结")
             }
 
             Section {
                 NavigationLink {
                     SettlementDetailView(
                         ledger: ledger,
-                        balanceResults: calculateBalanceResults(for: ledger),
                         suggestions: settlementSuggestions,
                         actionIds: settlementActionIds,
                         onRecordSettlement: { settlement in

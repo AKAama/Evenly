@@ -30,8 +30,7 @@ final class EvenlyUITests: XCTestCase {
         let email = app.textFields["login-email"]
         let password = app.secureTextFields["login-password"]
         email.tap()
-        email.typeText("aj@qq.com")
-        password.tap()
+        email.typeText("aj@qq.com\n")
         password.typeText("admin123")
         XCTAssertTrue(app.keyboards.element.exists)
 

@@ -80,14 +80,19 @@ struct AddExpenseView: View {
                 }
 
                 Section("参与人") {
-                    if registeredParticipants.isEmpty {
-                        Text("临时成员暂不支持参与账单分摊")
+                    if participants.isEmpty {
+                        Text("请先在账本中添加成员")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(registeredParticipants) { participant in
+                        ForEach(participants) { participant in
                             HStack {
                                 Text(participant.name)
                                     .dynamicTypeSize(.accessibility2)
+                                if participant.isTemporary {
+                                    Text("临时")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
                                 Spacer()
                                 if selectedParticipantIds.contains(participant.id) {
                                     Image(systemName: "checkmark")
@@ -189,7 +194,7 @@ struct AddExpenseView: View {
               payer.userId?.isEmpty == false else { return }
 
         selectedParticipantIds.insert(payer.id)
-        let selectedParticipants = registeredParticipants.filter { selectedParticipantIds.contains($0.id) }
+        let selectedParticipants = participants.filter { selectedParticipantIds.contains($0.id) }
         guard !selectedParticipants.isEmpty else { return }
 
         errorMessage = nil

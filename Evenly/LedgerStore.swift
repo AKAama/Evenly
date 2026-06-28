@@ -68,6 +68,12 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     self.ledgers = responses.map { Ledger(from: $0) }.sorted { $0.title < $1.title }
 
+                    for response in responses where response.needsSummaryHydration {
+                        if let ledgerId = UUID(uuidString: response.id) {
+                            self.hydrateSummary(ledgerId: ledgerId)
+                        }
+                    }
+
                     let selectedId = self.currentLedger?.id
                         ?? UserDefaults.standard.string(forKey: self.userDefaultsKey).flatMap(UUID.init(uuidString:))
                         ?? self.ledgers.first?.id
@@ -107,6 +113,27 @@ final class LedgerStore: ObservableObject {
                 } catch {
                     print("Failed to fetch ledger details: \(error)")
                 }
+            }
+        }
+    }
+
+    private func hydrateSummary(ledgerId: UUID) {
+        Task {
+            do {
+                let detail: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledgerId.uuidString))
+                let expenses: [ExpenseWithDetails] = try await api.get(APIEndpoints.expenses(ledgerId: ledgerId.uuidString))
+
+                await MainActor.run {
+                    guard let index = self.ledgers.firstIndex(where: { $0.id == ledgerId }) else { return }
+                    self.ledgers[index].memberCount = detail.members.count
+                    self.ledgers[index].expenseCount = expenses.count
+                    if self.currentLedger?.id == ledgerId {
+                        self.currentLedger?.memberCount = detail.members.count
+                        self.currentLedger?.expenseCount = expenses.count
+                    }
+                }
+            } catch {
+                print("Failed to hydrate ledger summary \(ledgerId): \(error)")
             }
         }
     }

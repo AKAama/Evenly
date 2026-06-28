@@ -53,10 +53,11 @@ struct Expense: Identifiable, Codable {
         self.title = response.title
         self.amount = response.totalAmount
         self.payer = participants.first { $0.userId == response.payerId } ?? Person(name: response.payer.displayName ?? "Unknown", userId: response.payerId)
-        let splitUserIds = Set(response.splits.map(\.userId))
+        let splitUserIds = Set(response.splits.compactMap(\.userId))
+        let splitMemberIds = Set(response.splits.compactMap(\.memberId))
         self.participants = participants.filter { person in
-            guard let userId = person.userId else { return false }
-            return splitUserIds.contains(userId)
+            splitMemberIds.contains(person.id.uuidString)
+                || person.userId.map(splitUserIds.contains) == true
         }
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
         self.note = response.note
@@ -109,16 +110,18 @@ enum ExpenseStatus: String, Codable {
 // Create API request model
 extension Expense {
     func toCreateRequest(payerId: String, ledgerId: UUID) -> ExpenseCreate {
-        let registeredParticipants = participants.filter { ($0.userId?.isEmpty == false) }
         let cents = NSDecimalNumber(decimal: amount * 100).rounding(accordingToBehavior: nil).intValue
-        let baseCents = cents / max(registeredParticipants.count, 1)
-        let remainder = cents % max(registeredParticipants.count, 1)
+        let baseCents = cents / max(participants.count, 1)
+        let remainder = cents % max(participants.count, 1)
 
-        let splits = registeredParticipants.enumerated().compactMap { index, participant -> ExpenseSplitCreate? in
-            guard let userId = participant.userId else { return nil }
+        let splits = participants.enumerated().map { index, participant in
             let participantCents = baseCents + (index < remainder ? 1 : 0)
             let shareAmount = Decimal(participantCents) / 100
-            return ExpenseSplitCreate(userId: userId, amount: shareAmount)
+            return ExpenseSplitCreate(
+                userId: participant.userId,
+                memberId: participant.id.uuidString,
+                amount: shareAmount
+            )
         }
 
         return ExpenseCreate(

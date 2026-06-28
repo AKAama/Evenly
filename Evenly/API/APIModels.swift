@@ -161,6 +161,10 @@ struct LedgerResponse: Decodable, Identifiable {
         case memberCount = "member_count"
         case expenseCount = "expense_count"
     }
+
+    var needsSummaryHydration: Bool {
+        memberCount == nil || expenseCount == nil
+    }
 }
 
 struct LedgerWithMembers: Decodable {
@@ -261,11 +265,13 @@ struct ExpenseCreate: Encodable {
 }
 
 struct ExpenseSplitCreate: Encodable {
-    let userId: String
+    let userId: String?
+    let memberId: String
     let amount: Decimal
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
+        case memberId = "member_id"
         case amount
     }
 }
@@ -368,7 +374,8 @@ struct ExpenseWithDetails: Decodable, Identifiable {
 struct ExpenseSplitResponse: Decodable, Identifiable {
     let id: String
     let expenseId: String
-    let userId: String
+    let userId: String?
+    let memberId: String?
     let amount: Decimal
     let createdAt: Date?
 
@@ -376,6 +383,7 @@ struct ExpenseSplitResponse: Decodable, Identifiable {
         case id
         case expenseId = "expense_id"
         case userId = "user_id"
+        case memberId = "member_id"
         case amount
         case createdAt = "created_at"
     }
@@ -384,7 +392,8 @@ struct ExpenseSplitResponse: Decodable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         expenseId = try container.decode(String.self, forKey: .expenseId)
-        userId = try container.decode(String.self, forKey: .userId)
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        memberId = try container.decodeIfPresent(String.self, forKey: .memberId)
         amount = try container.decodeFlexibleDecimal(forKey: .amount)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
     }

@@ -133,8 +133,6 @@ struct LoginView: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, minHeight: 700)
-                .contentShape(Rectangle())
-                .onTapGesture { focusedField = nil }
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: focusedField) { _, field in

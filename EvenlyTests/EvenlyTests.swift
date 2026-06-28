@@ -68,6 +68,81 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual(object["expense_date"] as? String, "2026-06-28")
     }
 
+    func testExpenseRequestIncludesTemporaryLedgerMemberSplit() throws {
+        let payer = Person(name: "Stella", userId: "22222222-2222-2222-2222-222222222222")
+        let temporary = Person(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            name: "Temporary",
+            isTemporary: true
+        )
+        let expense = Expense(title: "Lunch", amount: 12, payer: payer, participants: [payer, temporary])
+
+        let request = expense.toCreateRequest(
+            payerId: payer.userId!,
+            ledgerId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        )
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let splits = try XCTUnwrap(object["splits"] as? [[String: Any]])
+
+        XCTAssertEqual(splits.count, 2)
+        let temporarySplit = try XCTUnwrap(splits.first {
+            $0["user_id"] == nil || $0["user_id"] is NSNull
+        })
+        XCTAssertEqual(temporarySplit["member_id"] as? String, temporary.id.uuidString)
+    }
+
+    func testLedgerResponseWithoutSummaryRequiresHydration() throws {
+        let json = """
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "name": "Trip",
+          "owner_id": "22222222-2222-2222-2222-222222222222",
+          "currency": "CNY"
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(LedgerResponse.self, from: json)
+
+        XCTAssertTrue(response.needsSummaryHydration)
+    }
+
+    func testExpenseDetailsMapsTemporarySplitByLedgerMemberID() throws {
+        let temporaryId = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let json = """
+        {
+          "id": "44444444-4444-4444-4444-444444444444",
+          "ledger_id": "11111111-1111-1111-1111-111111111111",
+          "payer_id": "22222222-2222-2222-2222-222222222222",
+          "created_by": "22222222-2222-2222-2222-222222222222",
+          "title": "Lunch",
+          "total_amount": "12.00",
+          "status": "pending",
+          "payer": {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "email": "stella@example.com",
+            "display_name": "Stella"
+          },
+          "splits": [
+            {
+              "id": "55555555-5555-5555-5555-555555555555",
+              "expense_id": "44444444-4444-4444-4444-444444444444",
+              "user_id": null,
+              "member_id": "33333333-3333-3333-3333-333333333333",
+              "amount": "6.00"
+            }
+          ],
+          "confirmations": []
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(ExpenseWithDetails.self, from: json)
+        let temporary = Person(id: temporaryId, name: "Temporary", isTemporary: true)
+
+        let expense = Expense(from: response, participants: [temporary])
+
+        XCTAssertEqual(expense.participants, [temporary])
+    }
+
     func testAPIErrorUsesFastAPIDetail() {
         let data = #"{"detail":"Payer must be a registered ledger member"}"#.data(using: .utf8)!
 

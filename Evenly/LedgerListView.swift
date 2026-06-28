@@ -117,10 +117,8 @@ struct LedgerListView: View {
                     .dynamicTypeSize(.accessibility2)
                 
                 HStack(spacing: 8) {
-                    Label("\(ledger.participants.count)", systemImage: "person.2")
-                    if !ledger.expenses.isEmpty {
-                        Label("\(ledger.expenses.count)", systemImage: "list.bullet")
-                    }
+                    Label("\(ledger.memberCount)", systemImage: "person.2")
+                    Label("\(ledger.expenseCount)", systemImage: "list.bullet")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

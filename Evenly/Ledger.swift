@@ -65,6 +65,13 @@ struct Ledger: Identifiable, Codable {
     var participants: [Person]
     var expenses: [Expense]
     var members: [MemberResponse]?
+    var memberCount: Int
+    var expenseCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, ownerId, memberIds, participants, expenses, members
+        case memberCount, expenseCount
+    }
 
     init(
         id: UUID = UUID(),
@@ -73,7 +80,9 @@ struct Ledger: Identifiable, Codable {
         memberIds: [String] = [],
         participants: [Person] = [],
         expenses: [Expense] = [],
-        members: [MemberResponse]? = nil
+        members: [MemberResponse]? = nil,
+        memberCount: Int? = nil,
+        expenseCount: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -82,6 +91,34 @@ struct Ledger: Identifiable, Codable {
         self.participants = participants
         self.expenses = expenses
         self.members = members
+        self.memberCount = memberCount ?? participants.count
+        self.expenseCount = expenseCount ?? expenses.count
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        ownerId = try container.decode(String.self, forKey: .ownerId)
+        memberIds = try container.decodeIfPresent([String].self, forKey: .memberIds) ?? []
+        participants = try container.decodeIfPresent([Person].self, forKey: .participants) ?? []
+        expenses = try container.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
+        members = try container.decodeIfPresent([MemberResponse].self, forKey: .members)
+        memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount) ?? participants.count
+        expenseCount = try container.decodeIfPresent(Int.self, forKey: .expenseCount) ?? expenses.count
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(ownerId, forKey: .ownerId)
+        try container.encode(memberIds, forKey: .memberIds)
+        try container.encode(participants, forKey: .participants)
+        try container.encode(expenses, forKey: .expenses)
+        try container.encodeIfPresent(members, forKey: .members)
+        try container.encode(memberCount, forKey: .memberCount)
+        try container.encode(expenseCount, forKey: .expenseCount)
     }
 
     // Create from LedgerResponse
@@ -93,6 +130,8 @@ struct Ledger: Identifiable, Codable {
         self.participants = []
         self.expenses = []
         self.members = nil
+        self.memberCount = response.memberCount ?? 0
+        self.expenseCount = response.expenseCount ?? 0
     }
 
     // Create from LedgerWithMembers
@@ -104,6 +143,8 @@ struct Ledger: Identifiable, Codable {
         self.participants = response.members.map { Person(from: $0) }
         self.expenses = []
         self.members = response.members
+        self.memberCount = response.members.count
+        self.expenseCount = 0
     }
 
     var allMemberIds: [String] {
@@ -112,7 +153,7 @@ struct Ledger: Identifiable, Codable {
 
     /// 参与者数量（包含 owner 和所有 participants）
     var participantCount: Int {
-        participants.count
+        memberCount
     }
 
     /// Get member by userId

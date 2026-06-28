@@ -148,6 +148,8 @@ struct LedgerResponse: Decodable, Identifiable {
     let currency: String?
     let createdAt: Date?
     let updatedAt: Date?
+    let memberCount: Int?
+    let expenseCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -156,6 +158,8 @@ struct LedgerResponse: Decodable, Identifiable {
         case currency
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case memberCount = "member_count"
+        case expenseCount = "expense_count"
     }
 }
 

@@ -125,6 +125,8 @@ final class LedgerStore: ObservableObject {
                         } else {
                             merged.expenses = self.ledgers[index].expenses
                         }
+                        merged.memberCount = merged.participants.count
+                        merged.expenseCount = self.ledgers[index].expenseCount
                         self.ledgers[index] = merged
                         self.currentLedger = merged
                         self.fetchExpenses(for: merged)
@@ -147,6 +149,15 @@ final class LedgerStore: ObservableObject {
     }
 
     func applyUpdatedLedger(_ ledger: Ledger) {
+        var ledger = ledger
+        ledger.memberCount = ledger.participants.count
+        if let existing = ledgers.first(where: { $0.id == ledger.id }), ledger.expenses.isEmpty {
+            ledger.expenses = existing.expenses
+            ledger.expenseCount = existing.expenseCount
+        } else {
+            ledger.expenseCount = ledger.expenses.count
+        }
+
         if let index = ledgers.firstIndex(where: { $0.id == ledger.id }) {
             ledgers[index] = ledger
         } else {
@@ -352,6 +363,7 @@ final class LedgerStore: ObservableObject {
                     let expenses = responses.map { Expense(from: $0, participants: currentLedger.participants) }
                     if var updatedLedger = self.currentLedger {
                         updatedLedger.expenses = expenses
+                        updatedLedger.expenseCount = expenses.count
                         self.currentLedger = updatedLedger
 
                         if let index = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
@@ -386,6 +398,7 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     if var updatedLedger = self.currentLedger {
                         updatedLedger.expenses.append(newExpense)
+                        updatedLedger.expenseCount = updatedLedger.expenses.count
                         self.currentLedger = updatedLedger
 
                         if let index = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
@@ -411,6 +424,7 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     if var updatedLedger = self.currentLedger {
                         updatedLedger.expenses.removeAll { $0.id == expense.id }
+                        updatedLedger.expenseCount = updatedLedger.expenses.count
                         self.currentLedger = updatedLedger
 
                         if let index = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {

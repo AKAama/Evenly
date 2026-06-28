@@ -13,7 +13,7 @@ enum APIError: LocalizedError {
     case invalidURL
     case invalidResponse
     case unauthorized
-    case serverError(Int)
+    case serverError(Int, String?)
     case decodingError(Error)
     case networkError(Error)
 
@@ -25,13 +25,31 @@ enum APIError: LocalizedError {
             return "Invalid response from server"
         case .unauthorized:
             return "Please login again"
-        case .serverError(let code):
-            return "Server error: \(code)"
+        case .serverError(let code, let detail):
+            return detail ?? "Server error: \(code)"
         case .decodingError:
             return "Failed to parse response"
         case .networkError(let error):
             return error.localizedDescription
         }
+    }
+
+    static func server(statusCode: Int, data: Data) -> APIError {
+        let detail: String?
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let value = object["detail"] {
+            if let message = value as? String {
+                detail = message
+            } else if let issues = value as? [[String: Any]] {
+                let messages = issues.compactMap { $0["msg"] as? String }
+                detail = messages.isEmpty ? nil : messages.joined(separator: "\n")
+            } else {
+                detail = nil
+            }
+        } else {
+            detail = nil
+        }
+        return .serverError(statusCode, detail)
     }
 }
 
@@ -186,7 +204,7 @@ final class APIClient: ObservableObject {
             case 401:
                 throw APIError.unauthorized
             default:
-                throw APIError.serverError(httpResponse.statusCode)
+                throw APIError.server(statusCode: httpResponse.statusCode, data: data)
             }
         } catch let error as APIError {
             throw error
@@ -252,7 +270,7 @@ final class APIClient: ObservableObject {
             case 401:
                 throw APIError.unauthorized
             default:
-                throw APIError.serverError(httpResponse.statusCode)
+                throw APIError.server(statusCode: httpResponse.statusCode, data: data)
             }
         } catch let error as APIError {
             throw error

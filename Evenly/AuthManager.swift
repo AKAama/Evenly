@@ -100,7 +100,7 @@ class AuthManager: ObservableObject {
                 }
 
                 guard httpResponse.statusCode == 200 else {
-                    throw APIError.serverError(httpResponse.statusCode)
+                    throw APIError.server(statusCode: httpResponse.statusCode, data: data)
                 }
 
                 let decoder = JSONDecoder()
@@ -188,7 +188,7 @@ class AuthManager: ObservableObject {
             } catch let error as APIError {
                 await MainActor.run {
                     switch error {
-                    case .serverError(let code) where code == 400:
+                    case .serverError(let code, _) where code == 400:
                         self.registerError = "验证码错误或已过期"
                     default:
                         self.registerError = error.errorDescription ?? "注册失败"
@@ -237,7 +237,7 @@ class AuthManager: ObservableObject {
                 } else if httpResponse.statusCode == 429 {
                     completion(NSError(domain: "AuthManager", code: 429, userInfo: [NSLocalizedDescriptionKey: "发送过于频繁，请稍后重试"]))
                 } else {
-                    completion(APIError.serverError(httpResponse.statusCode))
+                    completion(APIError.serverError(httpResponse.statusCode, nil))
                 }
 
             } catch {

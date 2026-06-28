@@ -42,4 +42,35 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual(ledger.memberCount, 0)
         XCTAssertEqual(ledger.expenseCount, 0)
     }
+
+    func testExpenseRequestEncodesDateAsCalendarDate() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = calendar.date(from: DateComponents(year: 2026, month: 6, day: 28))!
+        let payer = Person(name: "Stella", userId: "22222222-2222-2222-2222-222222222222")
+        let expense = Expense(
+            title: "Lunch",
+            amount: 12,
+            payer: payer,
+            participants: [payer],
+            expenseDate: date
+        )
+
+        let request = expense.toCreateRequest(
+            payerId: payer.userId!,
+            ledgerId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        )
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["expense_date"] as? String, "2026-06-28")
+    }
+
+    func testAPIErrorUsesFastAPIDetail() {
+        let data = #"{"detail":"Payer must be a registered ledger member"}"#.data(using: .utf8)!
+
+        let error = APIError.server(statusCode: 400, data: data)
+
+        XCTAssertEqual(error.localizedDescription, "Payer must be a registered ledger member")
+    }
 }

@@ -18,7 +18,7 @@ struct AddExpenseView: View {
     @State private var errorMessage: String?
 
     let participants: [Person]
-    var onSave: (Expense) async -> Bool
+    var onSave: (Expense) async -> Result<Void, Error>
     private let existingId: UUID?
     private var registeredParticipants: [Person] {
         participants.filter { participant in
@@ -26,7 +26,7 @@ struct AddExpenseView: View {
         }
     }
 
-    init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) async -> Bool) {
+    init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) async -> Result<Void, Error>) {
         self.participants = participants
         self.onSave = onSave
         self.existingId = expense?.id
@@ -204,15 +204,16 @@ struct AddExpenseView: View {
         )
 
         Task {
-            let success = await onSave(expense)
+            let result = await onSave(expense)
             await MainActor.run {
                 isSaving = false
-                if success {
+                switch result {
+                case .success:
                     HapticManager.notificationOccurred(.success)
                     dismiss()
-                } else {
+                case .failure(let error):
                     HapticManager.notificationOccurred(.error)
-                    errorMessage = "保存失败，请检查网络或成员权限后重试"
+                    errorMessage = error.localizedDescription
                 }
             }
         }
@@ -253,5 +254,5 @@ struct AddExpenseView: View {
         Person(name: "张三"),
         Person(name: "李四"),
         Person(name: "王五")
-    ]) { _ in true }
+    ]) { _ in .success(()) }
 }

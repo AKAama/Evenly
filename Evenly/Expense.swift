@@ -127,7 +127,16 @@ extension Expense {
             payerId: payerId,
             splits: splits,
             note: note,
-            expenseDate: expenseDate
+            expenseDate: Self.requestDateFormatter.string(from: expenseDate ?? Date())
         )
     }
+
+    private static let requestDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }

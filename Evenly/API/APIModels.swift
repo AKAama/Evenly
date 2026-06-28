@@ -248,7 +248,7 @@ struct ExpenseCreate: Encodable {
     let payerId: String
     let splits: [ExpenseSplitCreate]
     let note: String?
-    let expenseDate: Date?
+    let expenseDate: String
 
     enum CodingKeys: String, CodingKey {
         case title

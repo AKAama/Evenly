@@ -251,14 +251,20 @@ struct LedgerDetailView: View {
         .sheet(isPresented: $showingAddExpense) {
             if let ledger = ledger {
                 AddExpenseView(participants: ledger.participants) { newExpense in
-                    guard !newExpense.title.isEmpty else { return false }
+                    guard !newExpense.title.isEmpty else {
+                        return .failure(NSError(
+                            domain: "AddExpense",
+                            code: -1,
+                            userInfo: [NSLocalizedDescriptionKey: "请输入账单名称"]
+                        ))
+                    }
                     return await withCheckedContinuation { continuation in
                         store.addExpense(newExpense, to: ledger) { result in
                             switch result {
                             case .success:
-                                continuation.resume(returning: true)
-                            case .failure:
-                                continuation.resume(returning: false)
+                                continuation.resume(returning: .success(()))
+                            case .failure(let error):
+                                continuation.resume(returning: .failure(error))
                             }
                         }
                     }

@@ -95,10 +95,9 @@ struct ContentView: View {
                             ledgerStore.addExpense(newExpense, to: ledger) { result in
                                 switch result {
                                 case .success:
-                                    continuation.resume(returning: true)
+                                    continuation.resume(returning: .success(()))
                                 case .failure(let error):
-                                    print("Failed to add expense: \(error)")
-                                    continuation.resume(returning: false)
+                                    continuation.resume(returning: .failure(error))
                                 }
                             }
                         }

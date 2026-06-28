@@ -433,7 +433,7 @@ final class LedgerStore: ObservableObject {
             return
         }
 
-        guard let payerId = expense.payer.userId, !payerId.isEmpty else {
+        guard let payerId = ledger.registeredUserId(for: expense.payer) else {
             completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "付款人必须是已注册成员"])))
             return
         }

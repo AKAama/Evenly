@@ -38,22 +38,13 @@ extension Person: Comparable {
 
 extension Person: Equatable {
     static func == (lhs: Person, rhs: Person) -> Bool {
-        // Compare by userId if available, otherwise by name
-        if let lhsUserId = lhs.userId, let rhsUserId = rhs.userId {
-            return lhsUserId == rhsUserId
-        }
-        return lhs.name == rhs.name && lhs.id == rhs.id
+        lhs.id == rhs.id
     }
 }
 
 extension Person {
     func hash(into hasher: inout Hasher) {
-        if let userId {
-            hasher.combine(userId)
-        } else {
-            hasher.combine(id)
-            hasher.combine(name)
-        }
+        hasher.combine(id)
     }
 }
 
@@ -164,5 +155,26 @@ struct Ledger: Identifiable, Codable {
     /// Get person by userId
     func person(by userId: String) -> Person? {
         participants.first { $0.userId == userId }
+    }
+
+    func registeredUserId(for person: Person) -> String? {
+        if let member = members?.first(where: { $0.id == person.id.uuidString }),
+           !member.isTemporary,
+           let userId = member.userId,
+           !userId.isEmpty {
+            return userId
+        }
+
+        if let participant = participants.first(where: { $0.id == person.id }),
+           !participant.isTemporary,
+           let userId = participant.userId,
+           !userId.isEmpty {
+            return userId
+        }
+
+        guard !person.isTemporary, let userId = person.userId, !userId.isEmpty else {
+            return nil
+        }
+        return userId
     }
 }

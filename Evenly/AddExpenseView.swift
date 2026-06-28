@@ -12,7 +12,7 @@ struct AddExpenseView: View {
     @Environment(\.dismiss) var dismiss
     @State private var title: String = ""
     @State private var amountText: String = ""
-    @State private var selectedPayer: Person?
+    @State private var selectedPayerId: UUID?
     @State private var selectedParticipantIds: Set<UUID> = []
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -25,6 +25,10 @@ struct AddExpenseView: View {
             !participant.isTemporary && participant.userId?.isEmpty == false
         }
     }
+    private var selectedPayer: Person? {
+        guard let selectedPayerId else { return nil }
+        return registeredParticipants.first { $0.id == selectedPayerId }
+    }
 
     init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) async -> Result<Void, Error>) {
         self.participants = participants
@@ -34,7 +38,7 @@ struct AddExpenseView: View {
         if let amount = expense?.amount {
             _amountText = State(initialValue: formatAmountForInput(amount))
         }
-        _selectedPayer = State(initialValue: expense?.payer)
+        _selectedPayerId = State(initialValue: expense?.payer.id)
         _selectedParticipantIds = State(initialValue: Set(expense?.participants.map(\.id) ?? []))
     }
 
@@ -64,15 +68,15 @@ struct AddExpenseView: View {
                         Text("请先在账本中添加已注册成员")
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("选择付款人", selection: $selectedPayer) {
+                        Picker("选择付款人", selection: $selectedPayerId) {
                             ForEach(registeredParticipants) { participant in
-                                Text(participant.name).tag(participant as Person?)
+                                Text(participant.name).tag(participant.id as UUID?)
                             }
                         }
                         .pickerStyle(.menu)
-                        .onChange(of: selectedPayer) { _, newPayer in
-                            if let newPayer {
-                                selectedParticipantIds.insert(newPayer.id)
+                        .onChange(of: selectedPayerId) { _, newPayerId in
+                            if let newPayerId {
+                                selectedParticipantIds.insert(newPayerId)
                             }
                             HapticManager.impact(.light)
                         }
@@ -106,8 +110,8 @@ struct AddExpenseView: View {
                             }
                         }
                         .onAppear {
-                            if selectedPayer == nil, let first = registeredParticipants.first {
-                                selectedPayer = first
+                            if selectedPayerId == nil, let first = registeredParticipants.first {
+                                selectedPayerId = first.id
                             }
                             if selectedParticipantIds.isEmpty, let first = registeredParticipants.first {
                                 selectedParticipantIds.insert(first.id)
@@ -148,8 +152,8 @@ struct AddExpenseView: View {
             }
             .onAppear {
                 HapticManager.prepare()
-                if selectedPayer == nil, let first = registeredParticipants.first {
-                    selectedPayer = first
+                if selectedPayerId == nil, let first = registeredParticipants.first {
+                    selectedPayerId = first.id
                 }
                 if let selectedPayer {
                     selectedParticipantIds.insert(selectedPayer.id)
@@ -175,7 +179,7 @@ struct AddExpenseView: View {
 
     private func toggleParticipant(_ participant: Person) {
         HapticManager.impact(.light)
-        if selectedPayer?.id == participant.id {
+        if selectedPayerId == participant.id {
             selectedParticipantIds.insert(participant.id)
             return
         }

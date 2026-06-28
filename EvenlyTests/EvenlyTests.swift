@@ -188,4 +188,26 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual(store.ledger(id: ledgerId)?.participants, [stella])
         XCTAssertEqual(store.ledger(id: ledgerId)?.memberCount, 1)
     }
+
+    func testPersonIdentityRemainsStableWhenUserMetadataChanges() {
+        let memberId = UUID()
+        let stale = Person(id: memberId, name: "Stella")
+        let registered = Person(id: memberId, name: "Stella", userId: "user-1")
+
+        XCTAssertEqual(stale, registered)
+        XCTAssertEqual(Set([stale, registered]).count, 1)
+    }
+
+    func testLedgerResolvesRegisteredPayerFromMemberID() {
+        let memberId = UUID()
+        let stalePayer = Person(id: memberId, name: "Stella")
+        let registered = Person(id: memberId, name: "Stella", userId: "user-1")
+        let ledger = Ledger(
+            title: "Trip",
+            ownerId: "user-1",
+            participants: [registered]
+        )
+
+        XCTAssertEqual(ledger.registeredUserId(for: stalePayer), "user-1")
+    }
 }

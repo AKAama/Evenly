@@ -434,6 +434,13 @@ final class LedgerStore: ObservableObject {
         }
 
         guard let payerId = ledger.registeredUserId(for: expense.payer) else {
+            // Diagnostic: this guard should be unreachable for a payer picked
+            // from registeredParticipants. If it fires, log the payer + ledger
+            // member state so we can tell a real bug from a stale build.
+            let payer = expense.payer
+            let memberDump = ledger.members?.map { "(id=\($0.id),userId=\($0.userId ?? "nil"),isTemporary=\($0.isTemporary))" }
+                .joined(separator: ", ") ?? "members=nil"
+            print("[AddExpense] payer guard failed: payer(id=\(payer.id.uuidString),userId=\(payer.userId ?? "nil"),isTemporary=\(payer.isTemporary)); ledger.members=[\(memberDump)]; participants.userIds=\(ledger.participants.map { $0.userId ?? "nil" })")
             completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "付款人必须是已注册成员"])))
             return
         }

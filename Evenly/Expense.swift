@@ -54,9 +54,15 @@ struct Expense: Identifiable, Codable {
         self.amount = response.totalAmount
         self.payer = participants.first { $0.userId == response.payerId } ?? Person(name: response.payer.displayName ?? "Unknown", userId: response.payerId)
         let splitUserIds = Set(response.splits.compactMap(\.userId))
-        let splitMemberIds = Set(response.splits.compactMap(\.memberId))
+        // Compare member ids as UUIDs: the backend serializes them as lowercase
+        // strings, but `Person.id.uuidString` is uppercase, so a string
+        // comparison silently drops participants (notably temporary ones, which
+        // have no user_id fallback) whose ids contain hex letters.
+        let splitMemberIds: Set<UUID> = Set(response.splits.compactMap { split -> UUID? in
+            split.memberId.flatMap(UUID.init(uuidString:))
+        })
         self.participants = participants.filter { person in
-            splitMemberIds.contains(person.id.uuidString)
+            splitMemberIds.contains(person.id)
                 || person.userId.map(splitUserIds.contains) == true
         }
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending

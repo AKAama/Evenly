@@ -158,7 +158,10 @@ struct Ledger: Identifiable, Codable {
     }
 
     func registeredUserId(for person: Person) -> String? {
-        if let member = members?.first(where: { $0.id == person.id.uuidString }),
+        // Compare member ids as UUIDs: backend ids are lowercase strings while
+        // `person.id.uuidString` is uppercase, so a string comparison fails for
+        // ids containing hex letters.
+        if let member = members?.first(where: { UUID(uuidString: $0.id) == person.id }),
            !member.isTemporary,
            let userId = member.userId,
            !userId.isEmpty {

@@ -210,4 +210,74 @@ final class EvenlyTests: XCTestCase {
 
         XCTAssertEqual(ledger.registeredUserId(for: stalePayer), "user-1")
     }
+
+    // Regression: backend member ids are lowercase UUID strings, but
+    // `UUID(uuidString:).uuidString` is always uppercase. Comparisons that mix
+    // the two forms silently fail for any id containing hex letters (the prior
+    // tests only used all-digit ids like 33333333-… and hid the bug).
+    func testExpenseDecodeKeepsTemporaryParticipantWithLetterHexUUID() throws {
+        // Lowercase member id with hex letters, exactly as the backend serializes it.
+        let temporaryMemberId = "abcdef12-1234-1234-1234-1234567890ab"
+        let json = """
+        {
+          "id": "44444444-4444-4444-4444-444444444444",
+          "ledger_id": "11111111-1111-1111-1111-111111111111",
+          "payer_id": "22222222-2222-2222-2222-222222222222",
+          "created_by": "22222222-2222-2222-2222-222222222222",
+          "title": "Lunch",
+          "total_amount": "12.00",
+          "status": "pending",
+          "payer": {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "email": "stella@example.com",
+            "display_name": "Stella"
+          },
+          "splits": [
+            {
+              "id": "55555555-5555-5555-5555-555555555555",
+              "expense_id": "44444444-4444-4444-4444-444444444444",
+              "user_id": null,
+              "member_id": "\(temporaryMemberId)",
+              "amount": "6.00"
+            }
+          ],
+          "confirmations": []
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(ExpenseWithDetails.self, from: json)
+        let temporary = Person(
+            id: UUID(uuidString: temporaryMemberId)!,
+            name: "Temporary",
+            isTemporary: true
+        )
+
+        let expense = Expense(from: response, participants: [temporary])
+
+        XCTAssertEqual(expense.participants, [temporary])
+    }
+
+    func testRegisteredUserIdResolvesMemberWithLetterHexUUID() throws {
+        let ownerId = "22222222-2222-2222-2222-222222222222"
+        let ownerMemberId = "abcdef12-1234-1234-1234-1234567890ab"
+        let memberJSON = """
+        {
+          "id": "\(ownerMemberId)",
+          "user_id": "\(ownerId)",
+          "nickname": "Stella",
+          "is_temporary": false
+        }
+        """.data(using: .utf8)!
+        let owner = try JSONDecoder().decode(MemberResponse.self, from: memberJSON)
+        let ledger = Ledger(
+            title: "Trip",
+            ownerId: ownerId,
+            participants: [Person(from: owner)],
+            members: [owner]
+        )
+        // Person.id is the uppercase UUID form; the lookup must still match the
+        // lowercase member id and resolve the registered payer's user id.
+        let payer = ledger.participants.first!
+
+        XCTAssertEqual(ledger.registeredUserId(for: payer), ownerId)
+    }
 }

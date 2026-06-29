@@ -280,4 +280,29 @@ final class EvenlyTests: XCTestCase {
 
         XCTAssertEqual(ledger.registeredUserId(for: payer), ownerId)
     }
+
+    @MainActor
+    func testExpensePayerSurvivesStoredAsyncClosureBoundary() async {
+        let payer = Person(
+            id: UUID(uuidString: "1c726a4f-c2df-4734-b6f6-f043e52bf4f1")!,
+            name: "Stella",
+            userId: "a9a58c1b-17a4-43ce-b2b6-f2ba5b61a3c6"
+        )
+        var receivedPayer: Person?
+        let view = AddExpenseView(participants: [payer]) { expense in
+            receivedPayer = expense.payer
+            return .success(())
+        }
+        let expense = Expense(
+            title: "Regression",
+            amount: 12.34,
+            payer: payer,
+            participants: [payer]
+        )
+
+        _ = await view.onSave(expense)
+
+        XCTAssertEqual(receivedPayer?.id, payer.id)
+        XCTAssertEqual(receivedPayer?.userId, payer.userId)
+    }
 }

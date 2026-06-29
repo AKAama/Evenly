@@ -18,7 +18,7 @@ struct AddExpenseView: View {
     @State private var errorMessage: String?
 
     let participants: [Person]
-    var onSave: (Expense) async -> Result<Void, Error>
+    var onSave: @MainActor (Expense) async -> Result<Void, Error>
     private let existingId: UUID?
     private var registeredParticipants: [Person] {
         participants.filter { participant in
@@ -30,7 +30,7 @@ struct AddExpenseView: View {
         return registeredParticipants.first { $0.id == selectedPayerId }
     }
 
-    init(expense: Expense? = nil, participants: [Person], onSave: @escaping (Expense) async -> Result<Void, Error>) {
+    init(expense: Expense? = nil, participants: [Person], onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>) {
         self.participants = participants
         self.onSave = onSave
         self.existingId = expense?.id

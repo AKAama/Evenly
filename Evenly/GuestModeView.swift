@@ -1,6 +1,13 @@
 import SwiftUI
 import Combine
 
+private struct GuestTransfer: Identifiable {
+    let id = UUID()
+    let from: Person
+    let to: Person
+    let amount: Decimal
+}
+
 @MainActor
 final class GuestLedgerStore: ObservableObject {
     @Published private(set) var ledgers: [Ledger] = []
@@ -99,6 +106,35 @@ final class GuestLedgerStore: ObservableObject {
             }
         }
         return ledger.participants.map { ($0, balances[$0.id, default: 0]) }
+    }
+
+    fileprivate func settlementPlan(for ledger: Ledger) -> [GuestTransfer] {
+        var debtors = balances(for: ledger)
+            .filter { $0.1 < 0 }
+            .map { ($0.0, -$0.1) }
+            .sorted { $0.1 > $1.1 }
+        var creditors = balances(for: ledger)
+            .filter { $0.1 > 0 }
+            .sorted { $0.1 > $1.1 }
+        var result: [GuestTransfer] = []
+        var debtorIndex = 0
+        var creditorIndex = 0
+
+        while debtorIndex < debtors.count && creditorIndex < creditors.count {
+            let amount = min(debtors[debtorIndex].1, creditors[creditorIndex].1)
+            if amount > 0 {
+                result.append(GuestTransfer(
+                    from: debtors[debtorIndex].0,
+                    to: creditors[creditorIndex].0,
+                    amount: amount
+                ))
+            }
+            debtors[debtorIndex].1 -= amount
+            creditors[creditorIndex].1 -= amount
+            if debtors[debtorIndex].1 < Decimal(string: "0.005")! { debtorIndex += 1 }
+            if creditors[creditorIndex].1 < Decimal(string: "0.005")! { creditorIndex += 1 }
+        }
+        return result
     }
 
     private var currentIndex: Int? {
@@ -290,24 +326,26 @@ struct GuestModeView: View {
             }
 
             Section {
-                ForEach(store.balances(for: ledger), id: \.0.id) { person, balance in
-                    HStack {
-                        Text(String(person.name.prefix(1)).uppercased())
-                            .font(.caption.bold())
-                            .foregroundStyle(EvenlyStyle.blue)
-                            .frame(width: 34, height: 34)
-                            .background(EvenlyStyle.blue.opacity(0.11), in: Circle())
-                        Text(person.name)
-                            .fontWeight(.medium)
-                        Spacer()
-                        Text(balanceText(balance))
-                            .foregroundStyle(balance > 0 ? .green : (balance < 0 ? .red : .secondary))
+                let plan = store.settlementPlan(for: ledger)
+                if plan.isEmpty {
+                    Label("所有成员已结清", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    ForEach(plan) { transfer in
+                        HStack(spacing: 10) {
+                            Text("\(transfer.from.name) → \(transfer.to.name)")
+                                .fontWeight(.medium)
+                            Spacer()
+                            Text(currency(transfer.amount))
+                                .font(.headline)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             } header: {
-                Text("成员余额")
+                Text("结算方案")
             } footer: {
-                Text("正数表示应收，负数表示应付。")
+                Text("箭头左侧付款，右侧收款。方案会合并账单后尽量减少转账次数。")
             }
 
             Section("账单") {

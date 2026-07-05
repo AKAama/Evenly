@@ -141,6 +141,12 @@ struct SettingsView: View {
                         Text("1.0.0")
                             .foregroundStyle(.secondary)
                     }
+
+                    NavigationLink {
+                        ChangelogView()
+                    } label: {
+                        Label("更新日志", systemImage: "clock.arrow.circlepath")
+                    }
                     
                     Link(destination: URL(string: "https://app.ismyh.cn/privacy/")!) {
                         Label("隐私政策", systemImage: "hand.raised")

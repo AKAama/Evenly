@@ -19,6 +19,7 @@ enum APIEndpoints {
     static let uploadAvatar = "/users/me/avatar"
     static let updateUser = "/users/me"
     static let changePassword = "/users/me/password"
+    static let deleteAccount = "/users/me"
     static func searchUsers(q: String, limit: Int = 20) -> String {
         "/users/search?q=\(q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q)&limit=\(limit)"
     }
@@ -39,6 +40,10 @@ enum APIEndpoints {
     }
     static func leaveLedger(ledgerId: String) -> String {
         "/ledgers/\(ledgerId)/members/me"
+    }
+    static let pendingInvitations = "/ledgers/invitations/pending"
+    static func respondToInvitation(id: String, accept: Bool) -> String {
+        "/ledgers/invitations/\(id)/\(accept ? "accept" : "reject")"
     }
 
     // MARK: - Expenses

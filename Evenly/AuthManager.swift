@@ -13,6 +13,7 @@ class AuthManager: ObservableObject {
     @Published var user: UserResponse?
     @Published var userProfile: UserProfile?
     @Published var avatarImage: UIImage?
+    @Published var isGuestMode = false
 
     // Login/Register state
     @Published var loginIdentifier = ""
@@ -348,6 +349,19 @@ class AuthManager: ObservableObject {
         self.user = nil
         self.userProfile = nil
         self.avatarImage = nil
+        self.isGuestMode = false
+    }
+
+    func enterGuestMode() {
+        api.clearToken()
+        user = nil
+        userProfile = nil
+        avatarImage = nil
+        isGuestMode = true
+    }
+
+    func leaveGuestMode() {
+        isGuestMode = false
     }
 
     // MARK: - Password Reset
@@ -381,11 +395,33 @@ class AuthManager: ObservableObject {
         completion(false)
     }
 
-    // MARK: - Delete Account (placeholder - requires backend support)
+    // MARK: - Delete Account
 
     func deleteAccount(completion: @escaping (Error?) -> Void) {
-        // This feature requires backend support
-        completion(NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "删除账户功能暂不支持"]))
+        guard user != nil else {
+            completion(NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"]))
+            return
+        }
+
+        isLoading = true
+        Task {
+            do {
+                try await api.delete(APIEndpoints.deleteAccount)
+                await MainActor.run {
+                    self.api.clearToken()
+                    self.user = nil
+                    self.userProfile = nil
+                    self.avatarImage = nil
+                    self.isLoading = false
+                    completion(nil)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    completion(error)
+                }
+            }
+        }
     }
 
     // MARK: - Reauthenticate (placeholder - requires backend support)

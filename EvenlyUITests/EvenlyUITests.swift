@@ -42,4 +42,18 @@ final class EvenlyUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [keyboardDismissed], timeout: 2), .completed)
     }
+
+    func testGuestCanEnterWithoutCreatingAccount() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestingResetAuth"]
+        app.launch()
+
+        let guestButton = app.buttons["continue-as-guest"]
+        XCTAssertTrue(guestButton.waitForExistence(timeout: 5))
+        guestButton.tap()
+
+        XCTAssertTrue(app.staticTexts["开始本地记账"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["本地模式 · 数据不会上传"].exists)
+        XCTAssertTrue(app.buttons["创建本地账本"].exists)
+    }
 }

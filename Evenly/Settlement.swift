@@ -64,4 +64,24 @@ struct SettlementHistory: Identifiable {
         self.fromUserName = response.fromUser.displayName ?? response.fromUser.email ?? "Unknown"
         self.toUserName = response.toUser.displayName ?? response.toUser.email ?? "Unknown"
     }
+
+    private init(group: [SettlementHistory]) {
+        let latest = group.max { ($0.settledAt ?? .distantPast) < ($1.settledAt ?? .distantPast) }!
+        self.id = "\(latest.fromUserId)->\(latest.toUserId)"
+        self.ledgerId = latest.ledgerId
+        self.fromUserId = latest.fromUserId
+        self.toUserId = latest.toUserId
+        self.amount = group.reduce(Decimal.zero) { $0 + $1.amount }
+        self.note = nil
+        self.settledAt = latest.settledAt
+        self.fromUserName = latest.fromUserName
+        self.toUserName = latest.toUserName
+    }
+
+    static func merging(_ records: [SettlementHistory]) -> [SettlementHistory] {
+        Dictionary(grouping: records) { "\($0.fromUserId)->\($0.toUserId)" }
+            .values
+            .map(SettlementHistory.init(group:))
+            .sorted { ($0.settledAt ?? .distantPast) > ($1.settledAt ?? .distantPast) }
+    }
 }

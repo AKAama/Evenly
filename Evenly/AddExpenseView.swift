@@ -16,6 +16,12 @@ struct AddExpenseView: View {
     @State private var selectedParticipantIds: Set<UUID> = []
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @FocusState private var focusedField: InputField?
+
+    private enum InputField: Hashable {
+        case title
+        case amount
+    }
 
     let participants: [Person]
     var onSave: @MainActor (Expense) async -> Result<Void, Error>
@@ -48,6 +54,9 @@ struct AddExpenseView: View {
                 Section("账单名称") {
                     TextField("输入账单名称", text: $title)
                         .textInputAutocapitalization(.sentences)
+                        .focused($focusedField, equals: .title)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .amount }
                 }
 
                 Section("金额") {
@@ -56,6 +65,7 @@ struct AddExpenseView: View {
                             .foregroundStyle(.secondary)
                         TextField("0.00", text: $amountText)
                             .keyboardType(.decimalPad)
+                            .focused($focusedField, equals: .amount)
                             .onChange(of: amountText) { _, newValue in
                                 amountText = formatAmountInput(newValue)
                                 HapticManager.selection.selectionChanged()
@@ -75,6 +85,7 @@ struct AddExpenseView: View {
                         }
                         .pickerStyle(.menu)
                         .onChange(of: selectedPayerId) { _, newPayerId in
+                            focusedField = nil
                             if let newPayerId {
                                 selectedParticipantIds.insert(newPayerId)
                             }
@@ -106,6 +117,7 @@ struct AddExpenseView: View {
                             }
                             .contentShape(Rectangle())
                             .onTapGesture {
+                                focusedField = nil
                                 toggleParticipant(participant)
                             }
                         }
@@ -128,6 +140,7 @@ struct AddExpenseView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedParticipantIds.count)
             .navigationTitle(existingId == nil ? "新建账单" : "编辑账单")
             .toolbar {
@@ -148,6 +161,13 @@ struct AddExpenseView: View {
                         }
                     }
                     .disabled(!canSave || isSaving)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") {
+                        focusedField = nil
+                    }
+                    .fontWeight(.semibold)
                 }
             }
             .onAppear {
@@ -192,6 +212,7 @@ struct AddExpenseView: View {
     }
 
     private func saveExpense() {
+        focusedField = nil
         guard let amount = Decimal(string: amountText),
               !title.isEmpty,
               let payer = selectedPayer,

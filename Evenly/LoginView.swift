@@ -28,18 +28,32 @@ struct LoginView: View {
     }
 
     private var loginView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 32) {
-                    Spacer().frame(height: 60)
+        ZStack {
+            EvenlyStyle.softBackground
+                .ignoresSafeArea()
+
+            Circle()
+                .fill(EvenlyStyle.blue.opacity(0.10))
+                .frame(width: 320, height: 320)
+                .blur(radius: 2)
+                .offset(x: -220, y: -340)
+
+            Circle()
+                .fill(EvenlyStyle.indigo.opacity(0.08))
+                .frame(width: 260, height: 260)
+                .offset(x: 240, y: 390)
+
+            VStack(spacing: 20) {
+                    Spacer(minLength: 12)
 
                     Image("LoginLogo")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 96, height: 96)
+                        .frame(width: 88, height: 88)
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .accessibilityLabel("Evenly 图标")
                         .accessibilityIdentifier("login-logo")
+                        .shadow(color: EvenlyStyle.blue.opacity(0.25), radius: 24, y: 10)
 
                     VStack(spacing: 8) {
                         Text("Evenly")
@@ -52,7 +66,7 @@ struct LoginView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Spacer().frame(height: 32)
+                    Spacer(minLength: 4)
 
                     VStack(spacing: 16) {
                         CustomTextField(
@@ -105,7 +119,7 @@ struct LoginView: View {
                             .padding(.vertical, 14)
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .fill(auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty ? Color.gray : Color.blue)
+                            .fill(auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty ? Color.gray : EvenlyStyle.blue)
                             )
                             .foregroundStyle(.white)
                         }
@@ -113,8 +127,6 @@ struct LoginView: View {
                         .disabled(auth.isLoading || auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty)
                     }
                     .padding(.horizontal, 24)
-
-                    Spacer().frame(height: 24)
 
                     Button {
                         HapticManager.impact(.light)
@@ -130,19 +142,35 @@ struct LoginView: View {
                         .font(.subheadline)
                     }
 
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, minHeight: 700)
+                    Button {
+                        HapticManager.impact(.light)
+                        auth.enterGuestMode()
+                    } label: {
+                        Label("无需登录，本地使用", systemImage: "iphone")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                    .padding(.horizontal, 24)
+                    .accessibilityIdentifier("continue-as-guest")
+
+                    Text("本地模式无需注册，数据仅保存在这台设备上。登录后可使用云同步与多人协作。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+
+                    Spacer(minLength: 12)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: focusedField) { _, field in
-                guard let field else { return }
-                Task { @MainActor in
-                    await Task.yield()
-                    withAnimation { proxy.scrollTo(field, anchor: .center) }
-                }
-            }
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 18)
+            .contentShape(Rectangle())
+            .onTapGesture { focusedField = nil }
         }
+        .ignoresSafeArea(.keyboard)
         .navigationBarHidden(true)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {

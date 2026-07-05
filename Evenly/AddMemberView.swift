@@ -206,15 +206,7 @@ struct AddMemberView: View {
     
     private func memberRowView(_ participant: Person) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                
-                Text(String(participant.name.prefix(1)))
-                    .font(.headline)
-                    .foregroundStyle(.blue)
-            }
+            memberAvatar(for: participant)
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(participant.name)
@@ -241,6 +233,33 @@ struct AddMemberView: View {
                 Image(systemName: "trash")
                     .foregroundStyle(.red)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func memberAvatar(for participant: Person) -> some View {
+        if participant.isTemporary {
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.16))
+                Image(systemName: "person.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+            }
+            .frame(width: 40, height: 40)
+        } else {
+            RemoteAvatarView(
+                avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
+                fallbackText: participant.name,
+                size: 40
+            )
+        }
+    }
+
+    private func memberRecord(for participant: Person) -> MemberResponse? {
+        ledger.members?.first { member in
+            member.id == participant.id.uuidString
+                || (participant.userId != nil && member.userId == participant.userId)
         }
     }
 
@@ -365,7 +384,7 @@ struct AddMemberView: View {
 
             switch result {
             case .success:
-                successMessage = "添加成功！"
+                successMessage = "邀请已发送，等待对方接受"
                 searchResult = nil
                 searchText = ""
             case .failure(let error):

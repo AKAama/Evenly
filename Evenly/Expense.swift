@@ -18,6 +18,7 @@ struct Expense: Identifiable, Codable {
     var expenseDate: Date?
     var createdAt: Date?
     var updatedAt: Date?
+    let createdBy: String?
     /// 成员确认状态: userId -> ConfirmationStatus
     var confirmations: [String: ConfirmationStatus]
 
@@ -32,6 +33,7 @@ struct Expense: Identifiable, Codable {
         expenseDate: Date? = nil,
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
+        createdBy: String? = nil,
         confirmations: [String: ConfirmationStatus] = [:]
     ) {
         self.id = id
@@ -44,6 +46,7 @@ struct Expense: Identifiable, Codable {
         self.expenseDate = expenseDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.createdBy = createdBy
         self.confirmations = confirmations
     }
 
@@ -70,6 +73,7 @@ struct Expense: Identifiable, Codable {
         self.expenseDate = response.expenseDate
         self.createdAt = response.createdAt
         self.updatedAt = response.updatedAt
+        self.createdBy = response.createdBy
         
         // Parse confirmations from response
         var confirmations: [String: ConfirmationStatus] = [:]
@@ -91,7 +95,12 @@ struct Expense: Identifiable, Codable {
         self.expenseDate = response.expenseDate
         self.createdAt = response.createdAt
         self.updatedAt = response.updatedAt
-        self.confirmations = [:]
+        self.createdBy = response.createdBy
+        // The backend treats creation as the creator's confirmation. Mirror
+        // that state immediately instead of waiting for the next full refresh.
+        self.confirmations = participants.contains { $0.userId == response.createdBy }
+            ? [response.createdBy: .confirmed]
+            : [:]
     }
     
     /// 获取特定成员的确认状态

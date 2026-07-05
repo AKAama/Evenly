@@ -7,6 +7,44 @@
 
 import SwiftUI
 
+// MARK: - Evenly Visual Language
+enum EvenlyStyle {
+    static let blue = Color(red: 0.12, green: 0.48, blue: 0.96)
+    static let indigo = Color(red: 0.31, green: 0.25, blue: 0.88)
+    static let cyan = Color(red: 0.10, green: 0.72, blue: 0.82)
+
+    static let brandGradient = LinearGradient(
+        colors: [blue, indigo],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let softBackground = LinearGradient(
+        colors: [blue.opacity(0.12), indigo.opacity(0.06), Color.clear],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
+struct ElevatedCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.65), lineWidth: 0.75)
+            }
+            .shadow(color: EvenlyStyle.indigo.opacity(0.09), radius: 18, y: 8)
+    }
+}
+
+extension View {
+    func evenlyCard() -> some View {
+        modifier(ElevatedCardModifier())
+    }
+}
+
 // MARK: - Haptic Feedback Manager
 struct HapticManager {
     static let light = UIImpactFeedbackGenerator(style: .light)

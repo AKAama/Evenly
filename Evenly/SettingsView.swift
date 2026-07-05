@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var avatarItem: PhotosPickerItem?
     @State private var selectedAvatarImage: UIImage?
     @State private var isUploadingAvatar = false
+    @State private var showingDeleteAccountConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -77,8 +78,24 @@ struct SettingsView: View {
                             Label("修改密码", systemImage: "lock.rotation")
                         }
                         .disabled(isLoading)
+
+                        Button(role: .destructive) {
+                            HapticManager.notificationOccurred(.warning)
+                            showingDeleteAccountConfirmation = true
+                        } label: {
+                            HStack {
+                                Label("删除账户", systemImage: "person.crop.circle.badge.minus")
+                                Spacer()
+                                if isLoading {
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isLoading)
                     } header: {
                         Text("账户")
+                    } footer: {
+                        Text("删除账户将永久删除个人资料、拥有的账本及关联记录，且无法恢复。")
                     }
                 }
 
@@ -127,12 +144,12 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     
-                    Link(destination: URL(string: "https://example.com/privacy")!) {
+                    Link(destination: URL(string: "https://app.ismyh.cn/privacy/")!) {
                         Label("隐私政策", systemImage: "hand.raised")
                     }
                     
-                    Link(destination: URL(string: "https://example.com/terms")!) {
-                        Label("服务条款", systemImage: "doc.text")
+                    Link(destination: URL(string: "https://app.ismyh.cn/support/")!) {
+                        Label("支持与反馈", systemImage: "questionmark.circle")
                     }
                     
                     HStack {
@@ -156,6 +173,14 @@ struct SettingsView: View {
             .sheet(isPresented: $showingChangePassword) {
                 ChangePasswordView()
                     .environmentObject(auth)
+            }
+            .alert("永久删除账户？", isPresented: $showingDeleteAccountConfirmation) {
+                Button("取消", role: .cancel) {}
+                Button("永久删除", role: .destructive) {
+                    deleteAccount()
+                }
+            } message: {
+                Text("你的个人资料、拥有的账本、共享账本中的关联记录将被永久删除。此操作无法撤销。")
             }
         }
     }

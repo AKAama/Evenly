@@ -13,6 +13,7 @@ final class LedgerStore: ObservableObject {
     @Published var currentLedger: Ledger?
     @Published private(set) var isLoading = false
     @Published var error: String?
+    @Published private(set) var invitations: [LedgerInvitationResponse] = []
 
     private let api = APIClient.shared
     private var userId: String?
@@ -54,6 +55,7 @@ final class LedgerStore: ObservableObject {
         pollingTimer = nil
         ledgers = []
         currentLedger = nil
+        invitations = []
     }
 
     // MARK: - Fetch Ledgers
@@ -87,10 +89,38 @@ final class LedgerStore: ObservableObject {
                         self.currentLedger = nil
                     }
                 }
+                await fetchInvitationsWithoutBlockingLedgers()
             } catch {
                 await MainActor.run {
                     self.error = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    private func fetchInvitationsWithoutBlockingLedgers() async {
+        do {
+            let invitations: [LedgerInvitationResponse] = try await api.get(APIEndpoints.pendingInvitations)
+            await MainActor.run { self.invitations = invitations }
+        } catch {
+            // Invitations are supplementary. A temporarily unavailable or
+            // older backend must never hide the user's existing ledgers.
+            print("Failed to fetch ledger invitations: \(error)")
+        }
+    }
+
+    func respondToInvitation(_ invitation: LedgerInvitationResponse, accept: Bool) {
+        Task {
+            do {
+                let _: EmptyResponse = try await api.post(
+                    APIEndpoints.respondToInvitation(id: invitation.id, accept: accept)
+                )
+                await MainActor.run {
+                    self.invitations.removeAll { $0.id == invitation.id }
+                    if accept { self.fetchLedgers() }
+                }
+            } catch {
+                await MainActor.run { self.error = error.localizedDescription }
             }
         }
     }

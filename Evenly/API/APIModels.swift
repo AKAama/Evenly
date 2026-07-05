@@ -244,6 +244,22 @@ struct MemberResponse: Codable, Identifiable {
     }
 }
 
+struct LedgerInvitationResponse: Decodable, Identifiable {
+    let id: String
+    let ledgerId: String
+    let ledgerName: String
+    let invitedByName: String
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case invitedByName = "invited_by_name"
+        case createdAt = "created_at"
+    }
+}
+
 // MARK: - Expense Models
 
 struct ExpenseCreate: Encodable {

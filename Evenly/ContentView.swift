@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject var auth = AuthManager()
     @StateObject var ledgerStore = LedgerStore()
     @StateObject var themeManager = ThemeManager()
@@ -64,6 +65,8 @@ struct ContentView: View {
                         .tag(1)
                 }
                 .tint(.blue)
+            } else if auth.isGuestMode {
+                GuestModeView()
             } else {
                 LoginView()
             }
@@ -71,6 +74,11 @@ struct ContentView: View {
         .environmentObject(auth)
         .environmentObject(ledgerStore)
         .environmentObject(themeManager)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, auth.user != nil {
+                ledgerStore.fetchLedgers()
+            }
+        }
         .preferredColorScheme(themeManager.applyTheme())
         .sheet(item: $sheetType) { item in
             switch item {
@@ -146,6 +154,25 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(ledgerStore.currentLedger?.title ?? "账本")
+            .safeAreaInset(edge: .top) {
+                if let invitation = ledgerStore.invitations.first {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("账本邀请").font(.caption).foregroundStyle(.secondary)
+                            Text("\(invitation.invitedByName) 邀请你加入「\(invitation.ledgerName)」")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        Spacer()
+                        Button("拒绝") { ledgerStore.respondToInvitation(invitation, accept: false) }
+                            .buttonStyle(.bordered)
+                        Button("接受") { ledgerStore.respondToInvitation(invitation, accept: true) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial)
+                }
+            }
             .searchable(text: $searchText, prompt: "搜索账单")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -226,6 +253,13 @@ struct ContentView: View {
         
         return List {
             Section {
+                ledgerOverviewCard(ledger)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
+            Section {
                 if ledger.expenses.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "doc.text")
@@ -286,9 +320,9 @@ struct ContentView: View {
                         }
                     }
                 } header: {
-                    Text("我的结算")
+                    Text("与我相关的待结算")
                 } footer: {
-                    Text("仅展示与你相关的转账，点击右侧标记已结")
+                    Text("只显示需要你付款或收款的项目，完成转账后点击右侧勾选")
                 }
             }
 
@@ -303,7 +337,15 @@ struct ContentView: View {
                         }
                     )
                 } label: {
-                    Label("查看分账明细", systemImage: "list.bullet.rectangle.portrait")
+                    HStack {
+                        Label("查看全部结算方案", systemImage: "list.bullet.rectangle.portrait")
+                        Spacer()
+                        if !settlementSuggestions.isEmpty {
+                            Text("\(settlementSuggestions.count) 笔")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
 
@@ -312,7 +354,7 @@ struct ContentView: View {
                     Text("暂无结算记录")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(settlementHistory) { settlement in
+                    ForEach(SettlementHistory.merging(settlementHistory)) { settlement in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("\(settlement.fromUserName) → \(settlement.toUserName)")
@@ -330,7 +372,9 @@ struct ContentView: View {
                     }
                 }
             } header: {
-                Text("结算记录")
+                Text("已结算记录")
+            } footer: {
+                Text("这里保存已标记完成的转账，不会重复计入待结算金额")
             }
 	        }
 	        .listStyle(.insetGrouped)
@@ -342,6 +386,52 @@ struct ContentView: View {
                 loadSettlementData(for: ledger)
             }
 	    }
+
+    private func ledgerOverviewCard(_ ledger: Ledger) -> some View {
+        let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.amount }
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("账本总支出")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.8))
+                    Text(formatAmount(total))
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Image(systemName: "chart.pie.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(14)
+                    .background(.white.opacity(0.14), in: Circle())
+            }
+
+            HStack(spacing: 12) {
+                overviewMetric(icon: "person.2.fill", value: "\(ledger.participantCount)", label: "成员")
+                overviewMetric(icon: "receipt.fill", value: "\(ledger.expenses.count)", label: "账单")
+            }
+        }
+        .padding(22)
+        .background(Color(red: 0.10, green: 0.38, blue: 0.78))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: EvenlyStyle.blue.opacity(0.20), radius: 16, y: 8)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 5)
+    }
+
+    private func overviewMetric(icon: String, value: String, label: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+            Text(value).fontWeight(.bold)
+            Text(label).foregroundStyle(.white.opacity(0.72))
+        }
+        .font(.subheadline)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 9)
+        .background(.white.opacity(0.13), in: Capsule())
+    }
 
     private func expenseRowView(_ expense: Expense, ledger: Ledger) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -458,6 +548,7 @@ struct ContentView: View {
     private func canRespond(to expense: Expense) -> Bool {
         guard expense.status == .pending,
               let userId = auth.user?.id,
+              expense.createdBy != userId,
               expense.participants.contains(where: { $0.userId == userId }) else {
             return false
         }

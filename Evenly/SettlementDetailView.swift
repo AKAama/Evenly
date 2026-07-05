@@ -58,12 +58,12 @@ struct SettlementDetailView: View {
                     }
                 }
             } header: {
-                Text("结算方案")
+                Text("全部待结算")
             } footer: {
-                Text("所有人之间的转账方案，点击右侧标记已结")
+                Text("系统根据已确认账单生成的完整转账方案，完成后点击右侧勾选")
             }
         }
-        .navigationTitle("分账明细")
+        .navigationTitle("全部结算方案")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

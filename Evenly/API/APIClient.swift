@@ -65,7 +65,7 @@ final class APIClient: ObservableObject {
 
         #if DEBUG
         print("debug")
-        return "http://localhost:8000"
+        return "http://192.168.124.14:8000"
         #else
         print("prod")
         return "https://evenly.ismyh.cn/api"

@@ -24,6 +24,7 @@ struct AddExpenseView: View {
     }
 
     let participants: [Person]
+    let currentUserId: String?
     var onSave: @MainActor (Expense) async -> Result<Void, Error>
     private let existingId: UUID?
     private var registeredParticipants: [Person] {
@@ -36,15 +37,18 @@ struct AddExpenseView: View {
         return registeredParticipants.first { $0.id == selectedPayerId }
     }
 
-    init(expense: Expense? = nil, participants: [Person], onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>) {
+    init(expense: Expense? = nil, participants: [Person], currentUserId: String? = nil, onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>) {
         self.participants = participants
+        self.currentUserId = currentUserId
         self.onSave = onSave
         self.existingId = expense?.id
         _title = State(initialValue: expense?.title ?? "")
         if let amount = expense?.amount {
             _amountText = State(initialValue: formatAmountForInput(amount))
         }
-        _selectedPayerId = State(initialValue: expense?.payer.id)
+        let defaultPayer = participants.first { $0.userId == currentUserId }
+            ?? participants.first { !$0.isTemporary && $0.userId?.isEmpty == false }
+        _selectedPayerId = State(initialValue: expense?.payer.id ?? defaultPayer?.id)
         _selectedParticipantIds = State(initialValue: Set(expense?.participants.map(\.id) ?? []))
     }
 
@@ -122,7 +126,7 @@ struct AddExpenseView: View {
                             }
                         }
                         .onAppear {
-                            if selectedPayerId == nil, let first = registeredParticipants.first {
+                            if selectedPayerId == nil, let first = registeredParticipants.first(where: { $0.userId == currentUserId }) ?? registeredParticipants.first {
                                 selectedPayerId = first.id
                             }
                             if selectedParticipantIds.isEmpty, let first = registeredParticipants.first {

@@ -113,6 +113,35 @@ struct PasswordChange: Encodable {
     }
 }
 
+struct EmailRequest: Encodable {
+    let email: String
+}
+
+struct EmailChangeCodeRequest: Encodable {
+    let newEmail: String
+    enum CodingKeys: String, CodingKey { case newEmail = "new_email" }
+}
+
+struct EmailChangeRequest: Encodable {
+    let newEmail: String
+    let code: String
+    let password: String
+    enum CodingKeys: String, CodingKey {
+        case newEmail = "new_email"
+        case code, password
+    }
+}
+
+struct PasswordResetRequest: Encodable {
+    let email: String
+    let code: String
+    let newPassword: String
+    enum CodingKeys: String, CodingKey {
+        case email, code
+        case newPassword = "new_password"
+    }
+}
+
 struct MessageResponse: Decodable {
     let message: String
 }
@@ -213,6 +242,7 @@ struct MemberResponse: Codable, Identifiable {
     let user: UserResponse?
     let isTemporary: Bool
     let temporaryName: String?
+    let status: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -222,6 +252,7 @@ struct MemberResponse: Codable, Identifiable {
         case user
         case isTemporary = "is_temporary"
         case temporaryName = "temporary_name"
+        case status
     }
 
     func encode(to encoder: Encoder) throws {
@@ -233,6 +264,7 @@ struct MemberResponse: Codable, Identifiable {
         try container.encodeIfPresent(user, forKey: .user)
         try container.encode(isTemporary, forKey: .isTemporary)
         try container.encodeIfPresent(temporaryName, forKey: .temporaryName)
+        try container.encode(status, forKey: .status)
     }
 
     init(from decoder: Decoder) throws {
@@ -244,6 +276,7 @@ struct MemberResponse: Codable, Identifiable {
         user = try container.decodeIfPresent(UserResponse.self, forKey: .user)
         isTemporary = try container.decodeIfPresent(Bool.self, forKey: .isTemporary) ?? false
         temporaryName = try container.decodeIfPresent(String.self, forKey: .temporaryName)
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "active"
         id = decodedId ?? userId ?? UUID().uuidString
     }
 }

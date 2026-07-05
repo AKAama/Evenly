@@ -128,6 +128,8 @@ struct GuestModeView: View {
     @EnvironmentObject private var auth: AuthManager
     @StateObject private var store = GuestLedgerStore()
     @State private var sheet: GuestSheet?
+    @State private var selectedExpense: Expense?
+    @State private var showingMembers = false
     @State private var showingDeleteLedger = false
 
     private enum GuestSheet: String, Identifiable {
@@ -258,6 +260,16 @@ struct GuestModeView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingMembers) {
+            if let ledger = store.currentLedger {
+                NavigationStack { LedgerMembersView(ledger: ledger) }
+            }
+        }
+        .sheet(item: $selectedExpense) { expense in
+            if let ledger = store.currentLedger {
+                NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
+            }
+        }
         .alert("删除本地账本？", isPresented: $showingDeleteLedger) {
             Button("取消", role: .cancel) {}
             Button("删除", role: .destructive) {
@@ -304,25 +316,33 @@ struct GuestModeView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(ledger.expenses) { expense in
-                        HStack(spacing: 13) {
-                            Image(systemName: "fork.knife")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 40, height: 40)
-                                .background(EvenlyStyle.brandGradient, in: RoundedRectangle(cornerRadius: 12))
+                        Button {
+                            selectedExpense = expense
+                        } label: {
+                            HStack(spacing: 13) {
+                                Image(systemName: "fork.knife")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(EvenlyStyle.blue)
+                                    .frame(width: 40, height: 40)
+                                    .background(EvenlyStyle.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
 
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(expense.title)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(expense.title)
+                                        .font(.headline)
+                                    Text("\(expense.payer.name) 支付 · \(expense.participants.count) 人分摊")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(currency(expense.amount))
                                     .font(.headline)
-                                Text("\(expense.payer.name) 支付 · \(expense.participants.count) 人分摊")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.tertiary)
                             }
-                            Spacer()
-                            Text(currency(expense.amount))
-                                .font(.headline)
+                            .padding(.vertical, 5)
                         }
-                        .padding(.vertical, 5)
+                        .buttonStyle(.plain)
                     }
                     .onDelete(perform: store.deleteExpenses)
                 }
@@ -335,47 +355,46 @@ struct GuestModeView: View {
 
     private func guestOverviewCard(_ ledger: Ledger) -> some View {
         let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.amount }
-        return VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label("仅保存在此设备", systemImage: "lock.fill")
-                        .font(.caption.bold())
-                        .foregroundStyle(.white.opacity(0.8))
-                    Text(currency(total))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("本地累计支出")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-                Spacer()
-                Image(systemName: "iphone.gen3.radiowaves.left.and.right")
-                    .font(.system(size: 28))
+        return HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("本地总支出", systemImage: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.76))
+                Text(currency(total))
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                    .padding(14)
-                    .background(.white.opacity(0.14), in: Circle())
             }
 
+            Spacer(minLength: 8)
+
             HStack(spacing: 10) {
-                guestMetric("\(ledger.participants.count)", label: "成员", icon: "person.2.fill")
+                Button {
+                    showingMembers = true
+                } label: {
+                    guestMetric("\(ledger.participants.count)", label: "成员", icon: "person.2.fill")
+                }
+                .buttonStyle(.plain)
                 guestMetric("\(ledger.expenses.count)", label: "账单", icon: "receipt.fill")
             }
         }
-        .padding(22)
-        .background(EvenlyStyle.brandGradient)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: EvenlyStyle.indigo.opacity(0.24), radius: 18, y: 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(red: 0.10, green: 0.38, blue: 0.78))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: EvenlyStyle.blue.opacity(0.16), radius: 10, y: 5)
         .padding(.horizontal, 4)
         .padding(.vertical, 5)
     }
 
     private func guestMetric(_ value: String, label: String, icon: String) -> some View {
-        Label("\(value) \(label)", systemImage: icon)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
-            .background(.white.opacity(0.13), in: Capsule())
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+            Text("\(value) \(label)")
+                .fontWeight(.semibold)
+        }
+        .font(.caption)
+        .foregroundStyle(.white.opacity(0.86))
+        .frame(minWidth: 42)
     }
 
     private func balanceText(_ value: Decimal) -> String {

@@ -15,6 +15,7 @@ private enum LoginField: Hashable {
 struct LoginView: View {
     @EnvironmentObject var auth: AuthManager
     @State private var isShowingRegister = false
+    @State private var isShowingPasswordReset = false
     @FocusState private var focusedField: LoginField?
 
     var body: some View {
@@ -24,6 +25,9 @@ struct LoginView: View {
             } else {
                 loginView
             }
+        }
+        .sheet(isPresented: $isShowingPasswordReset) {
+            ForgotPasswordView().environmentObject(auth)
         }
     }
 
@@ -128,6 +132,12 @@ struct LoginView: View {
                     }
                     .padding(.horizontal, 24)
 
+                    Button("忘记密码？") {
+                        focusedField = nil
+                        isShowingPasswordReset = true
+                    }
+                    .font(.subheadline)
+
                     Button {
                         HapticManager.impact(.light)
                         isShowingRegister = true
@@ -202,6 +212,76 @@ struct LoginView: View {
                 HapticManager.notificationOccurred(.error)
             } else {
                 HapticManager.notificationOccurred(.success)
+            }
+        }
+    }
+}
+
+struct ForgotPasswordView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var email = ""
+    @State private var code = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var codeSent = false
+    @State private var isLoading = false
+    @State private var message: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("注册邮箱") {
+                    TextField("邮箱", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                }
+                if codeSent {
+                    Section("验证码") {
+                        TextField("6 位验证码", text: $code).keyboardType(.numberPad)
+                    }
+                    Section("新密码") {
+                        SecureField("新密码（至少 6 位）", text: $newPassword)
+                        SecureField("再次输入新密码", text: $confirmPassword)
+                    }
+                }
+                if let message { Section { Text(message).foregroundStyle(.secondary) } }
+            }
+            .navigationTitle("忘记密码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(codeSent ? "重置" : "发送验证码") { submit() }
+                        .disabled(!canSubmit || isLoading)
+                }
+            }
+        }
+    }
+
+    private var canSubmit: Bool {
+        guard auth.isValidEmail(email) else { return false }
+        if !codeSent { return true }
+        return !code.isEmpty && newPassword.count >= 6 && newPassword == confirmPassword
+    }
+
+    private func submit() {
+        isLoading = true
+        message = nil
+        if codeSent {
+            auth.resetPassword(email: email, code: code, newPassword: newPassword) { error in
+                isLoading = false
+                if let error { message = error.localizedDescription }
+                else { dismiss() }
+            }
+        } else {
+            auth.sendPasswordResetCode(email: email) { error in
+                isLoading = false
+                if let error { message = error.localizedDescription }
+                else {
+                    codeSent = true
+                    message = "如果该邮箱已注册，验证码将发送至邮箱"
+                }
             }
         }
     }

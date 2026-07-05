@@ -12,6 +12,7 @@ struct LedgerDetailView: View {
     
     let ledgerId: UUID
     @EnvironmentObject var store: LedgerStore
+    @EnvironmentObject var auth: AuthManager
     @State private var showingAddExpense = false
     @State private var showingDeleteLedgerAlert = false
     @State private var searchText = ""
@@ -250,7 +251,7 @@ struct LedgerDetailView: View {
         }
         .sheet(isPresented: $showingAddExpense) {
             if let ledger = ledger {
-                AddExpenseView(participants: ledger.participants) { newExpense in
+                AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id) { newExpense in
                     guard !newExpense.title.isEmpty else {
                         return .failure(NSError(
                             domain: "AddExpense",

@@ -308,10 +308,10 @@ class AuthManager: ObservableObject {
         }
     }
 
-    func updateUsername(_ username: String, completion: @escaping (Error?) -> Void) {
+    func updateDisplayName(_ displayName: String, completion: @escaping (Error?) -> Void) {
         Task {
             do {
-                let userUpdate = UserUpdate(displayName: username, avatarUrl: nil)
+                let userUpdate = UserUpdate(displayName: displayName, avatarUrl: nil)
                 let updatedUser: UserResponse = try await api.put(APIEndpoints.updateUser, body: userUpdate)
 
                 await MainActor.run {
@@ -324,11 +324,11 @@ class AuthManager: ObservableObject {
                         phone: self.userProfile?.phone,
                         avatarUrl: updatedUser.avatarUrl
                     )
+                    completion(nil)
                 }
-                completion(nil)
 
             } catch {
-                completion(error)
+                await MainActor.run { completion(error) }
             }
         }
     }
@@ -373,9 +373,49 @@ class AuthManager: ObservableObject {
 
     // MARK: - Password Reset
 
-    func resetPassword(email: String, completion: @escaping (Error?) -> Void) {
-        // Not implemented in backend yet
-        completion(NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "暂不支持密码重置"]))
+    func sendPasswordResetCode(email: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let _: MessageResponse = try await api.post(APIEndpoints.sendPasswordReset, body: EmailRequest(email: email))
+                await MainActor.run { completion(nil) }
+            } catch { await MainActor.run { completion(error) } }
+        }
+    }
+
+    func resetPassword(email: String, code: String, newPassword: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let request = PasswordResetRequest(email: email, code: code, newPassword: newPassword)
+                let _: MessageResponse = try await api.post(APIEndpoints.resetPassword, body: request)
+                await MainActor.run { completion(nil) }
+            } catch { await MainActor.run { completion(error) } }
+        }
+    }
+
+    func sendEmailChangeCode(newEmail: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let _: MessageResponse = try await api.post(APIEndpoints.sendEmailChange, body: EmailChangeCodeRequest(newEmail: newEmail))
+                await MainActor.run { completion(nil) }
+            } catch { await MainActor.run { completion(error) } }
+        }
+    }
+
+    func changeEmail(newEmail: String, code: String, password: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let request = EmailChangeRequest(newEmail: newEmail, code: code, password: password)
+                let updatedUser: UserResponse = try await api.put(APIEndpoints.changeEmail, body: request)
+                await MainActor.run {
+                    self.user = updatedUser
+                    self.userProfile = UserProfile(
+                        id: updatedUser.id, username: updatedUser.username, name: updatedUser.displayName,
+                        email: updatedUser.email, phone: self.userProfile?.phone, avatarUrl: updatedUser.avatarUrl
+                    )
+                    completion(nil)
+                }
+            } catch { await MainActor.run { completion(error) } }
+        }
     }
 
     // MARK: - Validation

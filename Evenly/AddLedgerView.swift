@@ -27,6 +27,8 @@ struct AddLedgerView: View {
     struct ParticipantInfo: Identifiable {
         let id = UUID()
         let name: String
+        var username: String? = nil
+        var avatarUrl: String? = nil
         var status: Status
         var isLoading: Bool = false
 
@@ -101,13 +103,15 @@ struct AddLedgerView: View {
                             selectUser(user)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "person.crop.circle")
-                                    .font(.title2)
-                                    .foregroundStyle(.blue)
+                                RemoteAvatarView(
+                                    avatarUrl: user.avatarUrl,
+                                    fallbackText: user.displayName ?? user.username,
+                                    size: 36
+                                )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户")
                                         .foregroundStyle(.primary)
-                                    Text(user.email)
+                                    Text("@\(user.username)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -195,15 +199,11 @@ struct AddLedgerView: View {
 
     private func participantRow(_ participant: ParticipantInfo) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(statusColor(for: participant.status).opacity(0.2))
-                    .frame(width: 40, height: 40)
-                
-                Text(String(participant.name.prefix(1)))
-                    .font(.headline)
-                    .foregroundStyle(statusColor(for: participant.status))
-            }
+            RemoteAvatarView(
+                avatarUrl: participant.avatarUrl,
+                fallbackText: participant.name,
+                size: 40
+            )
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(participant.name)
@@ -261,13 +261,18 @@ struct AddLedgerView: View {
         switch status {
         case .idle:
             Text("本地")
-        case .found(_, let foundName):
-            Text("@\(foundName)")
+        case .found:
+            Text("@\(participantUsername(for: status))")
         case .notFound:
             Text("未注册")
         case .local:
             Text("本地")
         }
+    }
+
+    private func participantUsername(for status: ParticipantInfo.Status) -> String {
+        guard case .found(_, let username) = status else { return "" }
+        return username
     }
 
     private var canSave: Bool {
@@ -318,7 +323,12 @@ struct AddLedgerView: View {
 
     private func selectUser(_ user: UserResponse) {
         let displayName = user.displayName ?? user.email.components(separatedBy: "@").first ?? "用户"
-        participants.append(ParticipantInfo(name: displayName, status: .found(userId: user.id, name: displayName)))
+        participants.append(ParticipantInfo(
+            name: displayName,
+            username: user.username,
+            avatarUrl: user.avatarUrl,
+            status: .found(userId: user.id, name: user.username)
+        ))
         participantInput = ""
         searchResults = []
         completedSearchQuery = ""

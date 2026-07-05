@@ -10,8 +10,6 @@ import SwiftUI
 struct SettlementDetailView: View {
     let ledger: Ledger
     let suggestions: [Settlement]
-    let actionIds: Set<String>
-    var onRecordSettlement: (Settlement) -> Void
 
     var body: some View {
         List {
@@ -43,24 +41,13 @@ struct SettlementDetailView: View {
                                 .font(.headline)
                                 .foregroundStyle(.orange)
 
-                            Button {
-                                onRecordSettlement(settlement)
-                            } label: {
-                                if actionIds.contains(settlement.id) {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "checkmark.circle")
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(actionIds.contains(settlement.id))
                         }
                     }
                 }
             } header: {
                 Text("全部待结算")
             } footer: {
-                Text("系统根据已确认账单生成的完整转账方案，完成后点击右侧勾选")
+                Text("系统根据全部未拒绝账单生成完整转账方案，不受结算确认影响")
             }
         }
         .navigationTitle("全部结算方案")

@@ -10,90 +10,43 @@ import PhotosUI
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthManager
     @EnvironmentObject var themeManager: ThemeManager
-    @State private var showingResetPasswordAlert = false
-    @State private var alertTitle = ""
-    @State private var alertMessage = ""
-    @State private var isLoading = false
-    @State private var showingChangePassword = false
-    @State private var avatarItem: PhotosPickerItem?
-    @State private var selectedAvatarImage: UIImage?
-    @State private var isUploadingAvatar = false
-    @State private var showingDeleteAccountConfirmation = false
 
     var body: some View {
         NavigationStack {
             List {
                 if let user = auth.user {
                     Section {
-                        HStack(spacing: 16) {
-                            PhotosPicker(selection: $avatarItem, matching: .images) {
-                                ZStack {
-                                    RemoteAvatarView(
-                                        avatarUrl: auth.userProfile?.avatarUrl,
-                                        localImage: selectedAvatarImage ?? auth.avatarImage,
-                                        fallbackText: auth.userProfile?.displayName ?? user.email,
-                                        size: 60
-                                    )
-                                    if isUploadingAvatar {
-                                        Circle()
-                                            .fill(.black.opacity(0.35))
-                                            .frame(width: 60, height: 60)
-                                        ProgressView()
-                                            .tint(.white)
-                                    }
+                        NavigationLink {
+                            AccountSettingsView()
+                                .environmentObject(auth)
+                        } label: {
+                            HStack(spacing: 16) {
+                                RemoteAvatarView(
+                                    avatarUrl: auth.userProfile?.avatarUrl,
+                                    localImage: auth.avatarImage,
+                                    fallbackText: auth.userProfile?.displayName ?? user.email,
+                                    size: 60
+                                )
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
+                                        .font(.headline)
+                                        .dynamicTypeSize(.accessibility2)
+                                    Text("@\(user.username)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
                                 }
-                            }
-                            .disabled(isUploadingAvatar)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
-                                    .font(.headline)
-                                    .dynamicTypeSize(.accessibility2)
-                                Text("@\(user.username)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Text(isUploadingAvatar ? "上传中..." : "点击更换头像")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                         .padding(.vertical, 8)
-                        .onChange(of: avatarItem) { _, newItem in
-                            handleAvatarSelection(newItem)
-                        }
-                        
-                        HStack {
-                            Label("邮箱", systemImage: "envelope")
-                            Spacer()
-                            Text(user.email)
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        Button {
-                            HapticManager.impact(.medium)
-                            showingChangePassword = true
-                        } label: {
-                            Label("修改密码", systemImage: "lock.rotation")
-                        }
-                        .disabled(isLoading)
 
                         Button(role: .destructive) {
                             HapticManager.notificationOccurred(.warning)
-                            showingDeleteAccountConfirmation = true
+                            auth.signOut()
                         } label: {
-                            HStack {
-                                Label("删除账户", systemImage: "person.crop.circle.badge.minus")
-                                Spacer()
-                                if isLoading {
-                                    ProgressView()
-                                }
-                            }
+                            Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                         }
-                        .disabled(isLoading)
                     } header: {
                         Text("账户")
-                    } footer: {
-                        Text("删除账户将永久删除个人资料、拥有的账本及关联记录，且无法恢复。")
                     }
                 }
 
@@ -122,16 +75,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("数据")
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        HapticManager.notificationOccurred(.warning)
-                        auth.signOut()
-                    } label: {
-                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                            .foregroundStyle(.red)
-                    }
                 }
 
                 Section {
@@ -169,23 +112,98 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("设置")
-            .alert(alertTitle, isPresented: $showingResetPasswordAlert) {
-                Button("确定", role: .cancel) {}
-            } message: {
-                Text(alertMessage)
-            }
-            .sheet(isPresented: $showingChangePassword) {
-                ChangePasswordView()
-                    .environmentObject(auth)
-            }
-            .alert("永久删除账户？", isPresented: $showingDeleteAccountConfirmation) {
-                Button("取消", role: .cancel) {}
-                Button("永久删除", role: .destructive) {
-                    deleteAccount()
+        }
+    }
+}
+
+struct AccountSettingsView: View {
+    @EnvironmentObject var auth: AuthManager
+    @State private var showingAlert = false
+    @State private var alertTitle = ""
+    @State private var alertMessage = ""
+    @State private var isLoading = false
+    @State private var showingChangePassword = false
+    @State private var showingChangeDisplayName = false
+    @State private var showingChangeEmail = false
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var selectedAvatarImage: UIImage?
+    @State private var isUploadingAvatar = false
+    @State private var showingDeleteAccountConfirmation = false
+
+    var body: some View {
+        List {
+            if let user = auth.user {
+                Section {
+                    HStack {
+                        Spacer()
+                        PhotosPicker(selection: $avatarItem, matching: .images) {
+                            ZStack {
+                                RemoteAvatarView(
+                                    avatarUrl: auth.userProfile?.avatarUrl,
+                                    localImage: selectedAvatarImage ?? auth.avatarImage,
+                                    fallbackText: auth.userProfile?.displayName ?? user.email,
+                                    size: 88
+                                )
+                                if isUploadingAvatar {
+                                    Circle().fill(.black.opacity(0.35)).frame(width: 88, height: 88)
+                                    ProgressView().tint(.white)
+                                }
+                            }
+                        }
+                        .disabled(isUploadingAvatar)
+                        Spacer()
+                    }
+                    .padding(.vertical, 10)
+                    .onChange(of: avatarItem) { _, item in handleAvatarSelection(item) }
                 }
-            } message: {
-                Text("你的个人资料、拥有的账本、共享账本中的关联记录将被永久删除。此操作无法撤销。")
+
+                Section("账户信息") {
+                    Button { showingChangeDisplayName = true } label: {
+                        LabeledContent("显示名称", value: auth.userProfile?.displayName ?? user.displayName ?? "用户")
+                    }
+                    .foregroundStyle(.primary)
+
+                    LabeledContent("用户名", value: "@\(user.username)")
+
+                    Button { showingChangeEmail = true } label: {
+                        LabeledContent("邮箱", value: user.email)
+                    }
+                    .foregroundStyle(.primary)
+
+                    Button { showingChangePassword = true } label: {
+                        Label("修改密码", systemImage: "lock.rotation")
+                    }
+
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        HapticManager.notificationOccurred(.warning)
+                        showingDeleteAccountConfirmation = true
+                    } label: {
+                        HStack {
+                            Label("删除账户", systemImage: "person.crop.circle.badge.minus")
+                            Spacer()
+                            if isLoading { ProgressView() }
+                        }
+                    }
+                    .disabled(isLoading)
+                } footer: {
+                    Text("删除账户将永久删除个人资料、拥有的账本及关联记录，且无法恢复。")
+                }
             }
+        }
+        .navigationTitle("账户设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingChangePassword) { ChangePasswordView().environmentObject(auth) }
+        .sheet(isPresented: $showingChangeDisplayName) { ChangeDisplayNameView().environmentObject(auth) }
+        .sheet(isPresented: $showingChangeEmail) { ChangeEmailView().environmentObject(auth) }
+        .alert(alertTitle, isPresented: $showingAlert) { Button("确定", role: .cancel) {} } message: { Text(alertMessage) }
+        .alert("永久删除账户？", isPresented: $showingDeleteAccountConfirmation) {
+            Button("取消", role: .cancel) {}
+            Button("永久删除", role: .destructive) { deleteAccount() }
+        } message: {
+            Text("你的个人资料、拥有的账本、共享账本中的关联记录将被永久删除。此操作无法撤销。")
         }
     }
 
@@ -243,30 +261,7 @@ struct SettingsView: View {
     private func showAlert(title: String, message: String) {
         alertTitle = title
         alertMessage = message
-        showingResetPasswordAlert = true
-    }
-
-    private func showUnsupportedFeature(_ message: String) {
-        alertTitle = "暂未支持"
-        alertMessage = message
-        showingResetPasswordAlert = true
-    }
-
-    private func resetPassword() {
-        guard let user = auth.user else { return }
-        let email = user.email
-        isLoading = true
-        auth.resetPassword(email: email) { error in
-            isLoading = false
-            if let error = error {
-                alertTitle = "错误"
-                alertMessage = error.localizedDescription
-            } else {
-                alertTitle = "重置邮件已发送"
-                alertMessage = "请检查您的邮箱，按照邮件指示重置密码。"
-            }
-            showingResetPasswordAlert = true
-        }
+        showingAlert = true
     }
 
     private func deleteAccount() {
@@ -276,7 +271,127 @@ struct SettingsView: View {
             if let error = error {
                 alertTitle = "错误"
                 alertMessage = error.localizedDescription
-                showingResetPasswordAlert = true
+                showingAlert = true
+            }
+        }
+    }
+}
+
+struct ChangeDisplayNameView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var trimmedName: String {
+        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("显示名称", text: $displayName)
+                        .textInputAutocapitalization(.words)
+                } footer: {
+                    Text("显示名称用于账本和成员列表，可以与其他用户重复。")
+                }
+
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("修改显示名称")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                displayName = auth.user?.displayName ?? ""
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { save() }
+                        .disabled(trimmedName.isEmpty || trimmedName.count > 100 || isSaving)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        auth.updateDisplayName(trimmedName) { error in
+            isSaving = false
+            if let error {
+                errorMessage = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
+            } else {
+                HapticManager.notificationOccurred(.success)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct ChangeEmailView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var newEmail = ""
+    @State private var code = ""
+    @State private var password = ""
+    @State private var codeSent = false
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("新邮箱") {
+                    TextField("邮箱", text: $newEmail)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                }
+                if codeSent {
+                    Section("验证") {
+                        TextField("邮箱验证码", text: $code).keyboardType(.numberPad)
+                        SecureField("当前密码", text: $password)
+                    }
+                }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+            }
+            .navigationTitle("换绑邮箱")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(codeSent ? "确认换绑" : "发送验证码") { submit() }
+                        .disabled(!canSubmit || isLoading)
+                }
+            }
+        }
+    }
+
+    private var canSubmit: Bool {
+        guard auth.isValidEmail(newEmail) else { return false }
+        return !codeSent || (!code.isEmpty && !password.isEmpty)
+    }
+
+    private func submit() {
+        isLoading = true
+        errorMessage = nil
+        if codeSent {
+            auth.changeEmail(newEmail: newEmail, code: code, password: password) { error in
+                isLoading = false
+                if let error { errorMessage = error.localizedDescription }
+                else { dismiss() }
+            }
+        } else {
+            auth.sendEmailChangeCode(newEmail: newEmail) { error in
+                isLoading = false
+                if let error { errorMessage = error.localizedDescription }
+                else { codeSent = true }
             }
         }
     }

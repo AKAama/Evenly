@@ -13,12 +13,16 @@ enum APIEndpoints {
     static let register = "/auth/register"
     static let sendVerification = "/auth/send-verification"
     static let verifyCode = "/auth/verify-code"
+    static let sendPasswordReset = "/auth/password-reset/send"
+    static let resetPassword = "/auth/password-reset"
 
     // MARK: - Users
     static let currentUser = "/users/me"
     static let uploadAvatar = "/users/me/avatar"
     static let updateUser = "/users/me"
     static let changePassword = "/users/me/password"
+    static let sendEmailChange = "/users/me/email/send-verification"
+    static let changeEmail = "/users/me/email"
     static let deleteAccount = "/users/me"
     static func searchUsers(q: String, limit: Int = 20) -> String {
         "/users/search?q=\(q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q)&limit=\(limit)"

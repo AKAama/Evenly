@@ -30,9 +30,26 @@ struct ContentView: View {
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
+        case createdByMe = "我创建的"
         case all = "全部"
 
         var id: Self { self }
+
+        var next: Self {
+            switch self {
+            case .involvingMe: return .createdByMe
+            case .createdByMe: return .all
+            case .all: return .involvingMe
+            }
+        }
+
+        var emptyTitle: String {
+            switch self {
+            case .involvingMe: return "暂无你参与的账单"
+            case .createdByMe: return "暂无你创建的账单"
+            case .all: return "暂无账单"
+            }
+        }
     }
     
     enum SheetType: Identifiable {
@@ -40,6 +57,8 @@ struct ContentView: View {
         case addLedger
         case addExpense
         case memberManagement(Ledger)
+        case memberList(Ledger)
+        case expenseDetail(Expense, Ledger)
 
         var id: String {
             switch self {
@@ -47,6 +66,8 @@ struct ContentView: View {
             case .addLedger: return "addLedger"
             case .addExpense: return "addExpense"
             case .memberManagement(let ledger): return "memberMgmt-\(ledger.id.uuidString)"
+            case .memberList(let ledger): return "memberList-\(ledger.id.uuidString)"
+            case .expenseDetail(let expense, _): return "expense-\(expense.id.uuidString)"
             }
         }
     }
@@ -107,11 +128,12 @@ struct ContentView: View {
 
             case .addExpense:
                 if let ledger = ledgerStore.currentLedger {
-                    AddExpenseView(participants: ledger.participants) { newExpense in
+                    AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id) { newExpense in
                         await withCheckedContinuation { continuation in
                             ledgerStore.addExpense(newExpense, to: ledger) { result in
                                 switch result {
                                 case .success:
+                                    loadSettlementData(for: ledger)
                                     continuation.resume(returning: .success(()))
                                 case .failure(let error):
                                     continuation.resume(returning: .failure(error))
@@ -123,7 +145,14 @@ struct ContentView: View {
 
             case .memberManagement(let ledger):
                 AddMemberView(ledgerId: ledger.id)
+                    .environmentObject(auth)
                     .environmentObject(ledgerStore)
+
+            case .memberList(let ledger):
+                NavigationStack { LedgerMembersView(ledger: ledger) }
+
+            case .expenseDetail(let expense, let ledger):
+                NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
             }
         }
         .alert("操作失败", isPresented: Binding(
@@ -253,9 +282,16 @@ struct ContentView: View {
     private func ledgerDetailView(_ ledger: Ledger) -> some View {
         let filteredExpenses: [Expense] = {
             let scopedExpenses: [Expense]
-            if expenseFilter == .involvingMe, let userId = auth.user?.id {
-                scopedExpenses = ledger.expenses.filter { expense in
-                    expense.participants.contains { $0.userId == userId }
+            if let userId = auth.user?.id {
+                switch expenseFilter {
+                case .involvingMe:
+                    scopedExpenses = ledger.expenses.filter { expense in
+                        expense.participants.contains { $0.userId == userId }
+                    }
+                case .createdByMe:
+                    scopedExpenses = ledger.expenses.filter { $0.createdBy == userId }
+                case .all:
+                    scopedExpenses = ledger.expenses
                 }
             } else {
                 scopedExpenses = ledger.expenses
@@ -296,7 +332,7 @@ struct ContentView: View {
                         Image(systemName: searchText.isEmpty ? "person.crop.circle.badge.questionmark" : "magnifyingglass")
                             .font(.system(size: 40))
                             .foregroundStyle(.tertiary)
-                        Text(searchText.isEmpty ? "暂无你参与的账单" : "未找到匹配的账单")
+                        Text(searchText.isEmpty ? expenseFilter.emptyTitle : "未找到匹配的账单")
                             .font(.headline)
                             .foregroundStyle(.secondary)
                     }
@@ -306,6 +342,10 @@ struct ContentView: View {
                     ForEach(filteredExpenses) { expense in
                         expenseRowView(expense, ledger: ledger)
                             .listRowAnimation()
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                sheetType = .expenseDetail(expense, ledger)
+                            }
                             .swipeActions(edge: .trailing) {
                                 if expense.createdBy == auth.user?.id {
                                     Button(role: .destructive) {
@@ -323,7 +363,7 @@ struct ContentView: View {
                     Text("账单")
                     Spacer()
                     Button {
-                        expenseFilter = expenseFilter == .involvingMe ? .all : .involvingMe
+                        expenseFilter = expenseFilter.next
                         HapticManager.selection.selectionChanged()
                     } label: {
                         HStack(spacing: 4) {
@@ -364,29 +404,6 @@ struct ContentView: View {
             }
 
             Section {
-                NavigationLink {
-                    SettlementDetailView(
-                        ledger: ledger,
-                        suggestions: settlementSuggestions,
-                        actionIds: settlementActionIds,
-                        onRecordSettlement: { settlement in
-                            recordSettlement(settlement, in: ledger)
-                        }
-                    )
-                } label: {
-                    HStack {
-                        Label("查看全部结算方案", systemImage: "list.bullet.rectangle.portrait")
-                        Spacer()
-                        if !settlementSuggestions.isEmpty {
-                            Text("\(settlementSuggestions.count) 笔")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-
-            Section {
                 if settlementHistory.isEmpty {
                     Text("暂无结算记录")
                         .foregroundStyle(.secondary)
@@ -411,7 +428,26 @@ struct ContentView: View {
             } header: {
                 Text("已结算记录")
             } footer: {
-                Text("这里保存已标记完成的转账，不会重复计入待结算金额")
+                Text("这里保存已标记完成的转账")
+            }
+
+            Section {
+                NavigationLink {
+                    SettlementDetailView(
+                        ledger: ledger,
+                        suggestions: settlementSuggestions
+                    )
+                } label: {
+                    HStack {
+                        Label("查看全部结算方案", systemImage: "list.bullet.rectangle.portrait")
+                        Spacer()
+                        if !settlementSuggestions.isEmpty {
+                            Text("\(settlementSuggestions.count) 笔")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
 	        }
 	        .listStyle(.insetGrouped)
@@ -443,7 +479,13 @@ struct ContentView: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 10) {
-                overviewMetric(icon: "person.2.fill", value: "\(ledger.participantCount)", label: "成员")
+                Button {
+                    sheetType = .memberList(ledger)
+                    HapticManager.impact(.light)
+                } label: {
+                    overviewMetric(icon: "person.2.fill", value: "\(ledger.participantCount)", label: "成员")
+                }
+                .buttonStyle(.plain)
                 overviewMetric(icon: "receipt.fill", value: "\(ledger.expenses.count)", label: "账单")
             }
         }
@@ -522,7 +564,7 @@ struct ContentView: View {
                         if respondingExpenseIds.contains(expense.id) {
                             ProgressView()
                         } else {
-                            Label("确认", systemImage: "checkmark.circle")
+                            Text("确认")
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -636,7 +678,23 @@ struct ContentView: View {
     /// 与当前用户相关的结算:我需转给别人的 + 别人需转给我的
     private func mySettlements(in ledger: Ledger) -> [Settlement] {
         guard let me = auth.user?.id else { return [] }
-        return settlementSuggestions.filter { $0.fromUserId == me || $0.toUserId == me }
+        let history = SettlementHistory.merging(settlementHistory)
+        return settlementSuggestions.compactMap { suggestion in
+            guard suggestion.fromUserId == me || suggestion.toUserId == me else { return nil }
+            let settled = history.first {
+                $0.fromUserId == suggestion.fromUserId && $0.toUserId == suggestion.toUserId
+            }?.amount ?? 0
+            let remaining = suggestion.amount - settled
+            guard remaining > 0 else { return nil }
+            return Settlement(
+                id: suggestion.id,
+                fromUserId: suggestion.fromUserId,
+                fromUserName: suggestion.fromUserName,
+                toUserId: suggestion.toUserId,
+                toUserName: suggestion.toUserName,
+                amount: remaining
+            )
+        }
     }
 
     @ViewBuilder

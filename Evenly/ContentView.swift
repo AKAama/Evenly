@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var expenseFilter: ExpenseFilter = .involvingMe
     @State private var showingDeleteConfirmation = false
     @State private var expenseToDelete: Expense?
+    @State private var expenseDeleteLedgerId: UUID?
     @State private var settlementSuggestions: [Settlement] = []
     @State private var settlementHistory: [SettlementHistory] = []
     @State private var isLoadingSettlementData = false
@@ -193,6 +194,22 @@ struct ContentView: View {
         } message: {
             Text(settlementConfirmMessage)
         }
+        .alert("删除账单", isPresented: Binding(
+            get: { expenseToDelete != nil },
+            set: { if !$0 { expenseToDelete = nil; expenseDeleteLedgerId = nil } }
+        )) {
+            Button("删除", role: .destructive) {
+                confirmDeleteExpense()
+            }
+            Button("取消", role: .cancel) {
+                expenseToDelete = nil
+                expenseDeleteLedgerId = nil
+            }
+        } message: {
+            if let expense = expenseToDelete {
+                Text("确定删除「\(expense.title)」？此操作无法撤销。")
+            }
+        }
     }
 
     private var settlementConfirmTitle: String { "确认转账" }
@@ -228,6 +245,33 @@ struct ContentView: View {
         recordSettlement(settlement, in: ledger)
         settlementToConfirm = nil
         pendingSettlementLedgerId = nil
+    }
+
+    private func confirmDeleteExpense() {
+        guard let expense = expenseToDelete else { return }
+        let ledger: Ledger?
+        if let lid = expenseDeleteLedgerId {
+            ledger = ledgerStore.ledgers.first(where: { $0.id == lid }) ?? ledgerStore.currentLedger
+        } else {
+            ledger = ledgerStore.currentLedger
+        }
+        guard let ledger else {
+            expenseToDelete = nil
+            expenseDeleteLedgerId = nil
+            return
+        }
+        ledgerStore.deleteExpense(expense, from: ledger) { result in
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+                loadSettlementData(for: ledger)
+            case .failure(let error):
+                HapticManager.notificationOccurred(.error)
+                actionError = error.localizedDescription
+            }
+        }
+        expenseToDelete = nil
+        expenseDeleteLedgerId = nil
     }
 
     @ViewBuilder
@@ -404,8 +448,9 @@ struct ContentView: View {
                             .swipeActions(edge: .trailing) {
                                 if expense.createdBy == auth.user?.id {
                                     Button(role: .destructive) {
-                                        HapticManager.notificationOccurred(.warning)
-                                        ledgerStore.deleteExpense(expense, from: ledger) { _ in }
+                                        HapticManager.impact(.light)
+                                        expenseToDelete = expense
+                                        expenseDeleteLedgerId = ledger.id
                                     } label: {
                                         Label("删除", systemImage: "trash")
                                     }

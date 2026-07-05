@@ -9,12 +9,14 @@
 import SwiftUI
 
 struct LedgerDetailView: View {
-    
+
     let ledgerId: UUID
     @EnvironmentObject var store: LedgerStore
     @EnvironmentObject var auth: AuthManager
     @State private var showingAddExpense = false
     @State private var showingDeleteLedgerAlert = false
+    @State private var expenseToDelete: Expense?
+    @State private var deleteError: String?
     @State private var searchText = ""
     
     struct BalanceResult: Identifiable {
@@ -158,11 +160,13 @@ struct LedgerDetailView: View {
                             }
                             .padding(.vertical, 4)
                             .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    HapticManager.notificationOccurred(.warning)
-                                    store.deleteExpense(expense, from: ledger) { _ in }
-                                } label: {
-                                    Label("删除", systemImage: "trash")
+                                if expense.createdBy == auth.user?.id {
+                                    Button(role: .destructive) {
+                                        HapticManager.impact(.light)
+                                        expenseToDelete = expense
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
                                 }
                             }
                             .listRowAnimation()
@@ -243,11 +247,51 @@ struct LedgerDetailView: View {
             Button("取消", role: .cancel) {}
             Button("删除", role: .destructive) {
                 if let ledger = ledger {
-                    store.deleteLedger(ledger) { _ in }
+                    store.deleteLedger(ledger) { result in
+                        if case .failure(let error) = result {
+                            deleteError = error.localizedDescription
+                        }
+                    }
                 }
             }
         } message: {
             Text("确定要删除账本「\(ledger?.title ?? "")」吗？此操作不可撤销。")
+        }
+        .alert("删除账单", isPresented: Binding(
+            get: { expenseToDelete != nil },
+            set: { if !$0 { expenseToDelete = nil } }
+        )) {
+            Button("删除", role: .destructive) {
+                guard let expense = expenseToDelete, let ledger = ledger else {
+                    expenseToDelete = nil
+                    return
+                }
+                store.deleteExpense(expense, from: ledger) { result in
+                    switch result {
+                    case .success:
+                        HapticManager.notificationOccurred(.success)
+                    case .failure(let error):
+                        HapticManager.notificationOccurred(.error)
+                        deleteError = error.localizedDescription
+                    }
+                }
+                expenseToDelete = nil
+            }
+            Button("取消", role: .cancel) {
+                expenseToDelete = nil
+            }
+        } message: {
+            if let expense = expenseToDelete {
+                Text("确定删除「\(expense.title)」？此操作无法撤销。")
+            }
+        }
+        .alert("操作失败", isPresented: Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("确定", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
         }
         .sheet(isPresented: $showingAddExpense) {
             if let ledger = ledger {

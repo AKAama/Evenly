@@ -194,10 +194,7 @@ struct ContentView: View {
         } message: {
             Text(settlementConfirmMessage)
         }
-        .alert("删除账单", isPresented: Binding(
-            get: { expenseToDelete != nil },
-            set: { if !$0 { expenseToDelete = nil; expenseDeleteLedgerId = nil } }
-        )) {
+        .alert("删除账单", presenting: $expenseToDelete) { expense in
             Button("删除", role: .destructive) {
                 confirmDeleteExpense()
             }
@@ -205,11 +202,14 @@ struct ContentView: View {
                 expenseToDelete = nil
                 expenseDeleteLedgerId = nil
             }
-        } message: {
-            if let expense = expenseToDelete {
-                Text("确定删除「\(expense.title)」？此操作无法撤销。")
-            }
+        } message: { _ in
+            Text(expenseDeleteMessage)
         }
+    }
+
+    private var expenseDeleteMessage: String {
+        guard let expense = expenseToDelete else { return "" }
+        return "确定删除「\(expense.title)」？此操作无法撤销。"
     }
 
     private var settlementConfirmTitle: String { "确认转账" }

@@ -257,38 +257,17 @@ struct LedgerDetailView: View {
         } message: {
             Text("确定要删除账本「\(ledger?.title ?? "")」吗？此操作不可撤销。")
         }
-        .alert("删除账单", isPresented: Binding(
-            get: { expenseToDelete != nil },
-            set: { if !$0 { expenseToDelete = nil } }
-        )) {
+        .alert("删除账单", presenting: $expenseToDelete) { expense in
             Button("删除", role: .destructive) {
-                guard let expense = expenseToDelete, let ledger = ledger else {
-                    expenseToDelete = nil
-                    return
-                }
-                store.deleteExpense(expense, from: ledger) { result in
-                    switch result {
-                    case .success:
-                        HapticManager.notificationOccurred(.success)
-                    case .failure(let error):
-                        HapticManager.notificationOccurred(.error)
-                        deleteError = error.localizedDescription
-                    }
-                }
-                expenseToDelete = nil
+                performDeleteExpense(expense)
             }
             Button("取消", role: .cancel) {
                 expenseToDelete = nil
             }
-        } message: {
-            if let expense = expenseToDelete {
-                Text("确定删除「\(expense.title)」？此操作无法撤销。")
-            }
+        } message: { _ in
+            Text(deleteExpenseMessage)
         }
-        .alert("操作失败", isPresented: Binding(
-            get: { deleteError != nil },
-            set: { if !$0 { deleteError = nil } }
-        )) {
+        .alert("操作失败", isPresented: $showingDeleteError) {
             Button("确定", role: .cancel) {}
         } message: {
             Text(deleteError ?? "")
@@ -316,6 +295,35 @@ struct LedgerDetailView: View {
                 }
             }
         }
+    }
+
+    private var showingDeleteError: Binding<Bool> {
+        Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )
+    }
+
+    private var deleteExpenseMessage: String {
+        guard let expense = expenseToDelete else { return "" }
+        return "确定删除「\(expense.title)」？此操作无法撤销。"
+    }
+
+    private func performDeleteExpense(_ expense: Expense) {
+        guard let ledger = ledger else {
+            expenseToDelete = nil
+            return
+        }
+        store.deleteExpense(expense, from: ledger) { result in
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+            case .failure(let error):
+                HapticManager.notificationOccurred(.error)
+                deleteError = error.localizedDescription
+            }
+        }
+        expenseToDelete = nil
     }
 }
 

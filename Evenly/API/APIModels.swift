@@ -54,6 +54,7 @@ struct RegisterRequest: Encodable {
 struct RegisterResponse: Decodable {
     let id: String
     let email: String
+    let username: String
     let displayName: String?
     let avatarUrl: String?
     let createdAt: Date?
@@ -63,6 +64,7 @@ struct RegisterResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case email
+        case username
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
         case createdAt = "created_at"
@@ -76,6 +78,7 @@ struct RegisterResponse: Decodable {
 struct UserResponse: Codable, Identifiable {
     let id: String
     let email: String
+    let username: String
     let displayName: String?
     let avatarUrl: String?
     let createdAt: Date?
@@ -83,6 +86,7 @@ struct UserResponse: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case email
+        case username
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
         case createdAt = "created_at"

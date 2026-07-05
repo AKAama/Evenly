@@ -71,7 +71,7 @@ struct LoginView: View {
                     VStack(spacing: 16) {
                         CustomTextField(
                             icon: "envelope.fill",
-                            placeholder: "邮箱",
+                            placeholder: "邮箱或用户名",
                             text: $auth.loginIdentifier,
                             focusedField: $focusedField,
                             field: .identifier
@@ -215,6 +215,7 @@ struct RegisterView: View {
     @State private var avatarImage: UIImage?
     @State private var showingImagePicker = false
     @State private var username = ""
+    @State private var displayName = ""
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -224,7 +225,7 @@ struct RegisterView: View {
     @FocusState private var focusedField: RegisterField?
 
     enum RegisterField: Hashable {
-        case username, email, code, password, confirmPassword
+        case displayName, username, email, code, password, confirmPassword
     }
 
     var body: some View {
@@ -249,6 +250,17 @@ struct RegisterView: View {
                     .foregroundStyle(.secondary)
 
                 VStack(spacing: 16) {
+                    HStack {
+                        Image(systemName: "person.text.rectangle")
+                            .foregroundStyle(.secondary)
+                        TextField("显示名称", text: $displayName)
+                            .focused($focusedField, equals: .displayName)
+                    }
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                    .id(RegisterField.displayName)
+
                     // 用户名
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
@@ -457,6 +469,7 @@ struct RegisterView: View {
 
     private var canRegister: Bool {
         auth.isValidUsername(username) &&
+        !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         auth.isValidEmail(email) &&
         codeSent &&
         !auth.verificationCode.isEmpty &&
@@ -467,6 +480,7 @@ struct RegisterView: View {
     private func register() {
         auth.signUp(
             username: username,
+            displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
             email: email,
             phone: "",
             password: password

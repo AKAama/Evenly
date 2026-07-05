@@ -49,11 +49,9 @@ struct SettingsView: View {
                                 Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
                                     .font(.headline)
                                     .dynamicTypeSize(.accessibility2)
-                                if let username = auth.userProfile?.username {
-                                    Text("@\(username)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text("@\(user.username)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                                 Text(isUploadingAvatar ? "上传中..." : "点击更换头像")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

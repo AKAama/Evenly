@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var sheetType: SheetType?
     @State private var searchText = ""
+    @State private var expenseFilter: ExpenseFilter = .involvingMe
     @State private var showingDeleteConfirmation = false
     @State private var expenseToDelete: Expense?
     @State private var settlementSuggestions: [Settlement] = []
@@ -22,9 +23,17 @@ struct ContentView: View {
     @State private var isLoadingSettlementData = false
     @State private var settlementError: String?
     @State private var settlementActionIds: Set<String> = []
+    @State private var loadedSettlementLedgerId: UUID?
     @State private var respondingExpenseIds: Set<UUID> = []
     @State private var actionError: String?
     @State private var showingLeaveLedgerAlert = false
+
+    private enum ExpenseFilter: String, CaseIterable, Identifiable {
+        case involvingMe = "有我参与"
+        case all = "全部"
+
+        var id: Self { self }
+    }
     
     enum SheetType: Identifiable {
         case ledgerDrawer
@@ -243,10 +252,17 @@ struct ContentView: View {
 
     private func ledgerDetailView(_ ledger: Ledger) -> some View {
         let filteredExpenses: [Expense] = {
-            if searchText.isEmpty {
-                return ledger.expenses
+            let scopedExpenses: [Expense]
+            if expenseFilter == .involvingMe, let userId = auth.user?.id {
+                scopedExpenses = ledger.expenses.filter { expense in
+                    expense.participants.contains { $0.userId == userId }
+                }
+            } else {
+                scopedExpenses = ledger.expenses
             }
-            return ledger.expenses.filter { 
+
+            guard !searchText.isEmpty else { return scopedExpenses }
+            return scopedExpenses.filter {
                 $0.title.localizedCaseInsensitiveContains(searchText) ||
                 $0.payer.name.localizedCaseInsensitiveContains(searchText)
             }
@@ -277,10 +293,10 @@ struct ContentView: View {
                     .padding(.vertical, 30)
                 } else if filteredExpenses.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
+                        Image(systemName: searchText.isEmpty ? "person.crop.circle.badge.questionmark" : "magnifyingglass")
                             .font(.system(size: 40))
                             .foregroundStyle(.tertiary)
-                        Text("未找到匹配的账单")
+                        Text(searchText.isEmpty ? "暂无你参与的账单" : "未找到匹配的账单")
                             .font(.headline)
                             .foregroundStyle(.secondary)
                     }
@@ -303,7 +319,24 @@ struct ContentView: View {
                     }
 	                }
             } header: {
-                Text("账单")
+                HStack {
+                    Text("账单")
+                    Spacer()
+                    Button {
+                        expenseFilter = expenseFilter == .involvingMe ? .all : .involvingMe
+                        HapticManager.selection.selectionChanged()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(expenseFilter.rawValue)
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                }
+                .textCase(nil)
             }
 
             let mine = mySettlements(in: ledger)
@@ -384,57 +417,54 @@ struct ContentView: View {
 	        .listStyle(.insetGrouped)
 	        .scrollDismissesKeyboard(.interactively)
             .onAppear {
-                loadSettlementData(for: ledger)
+                if loadedSettlementLedgerId != ledger.id {
+                    loadedSettlementLedgerId = ledger.id
+                    loadSettlementData(for: ledger)
+                }
             }
             .onChange(of: ledger.id) { _, _ in
+                loadedSettlementLedgerId = ledger.id
                 loadSettlementData(for: ledger)
             }
 	    }
 
     private func ledgerOverviewCard(_ ledger: Ledger) -> some View {
         let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.amount }
-        return VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("账本总支出")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.8))
-                    Text(formatAmount(total))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                Spacer()
-                Image(systemName: "chart.pie.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(14)
-                    .background(.white.opacity(0.14), in: Circle())
+        return HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("账本总支出")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.76))
+                Text(formatAmount(total))
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
             }
 
-            HStack(spacing: 12) {
+            Spacer(minLength: 8)
+
+            HStack(spacing: 10) {
                 overviewMetric(icon: "person.2.fill", value: "\(ledger.participantCount)", label: "成员")
                 overviewMetric(icon: "receipt.fill", value: "\(ledger.expenses.count)", label: "账单")
             }
         }
-        .padding(22)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(Color(red: 0.10, green: 0.38, blue: 0.78))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: EvenlyStyle.blue.opacity(0.20), radius: 16, y: 8)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: EvenlyStyle.blue.opacity(0.16), radius: 10, y: 5)
         .padding(.horizontal, 4)
         .padding(.vertical, 5)
     }
 
     private func overviewMetric(icon: String, value: String, label: String) -> some View {
-        HStack(spacing: 9) {
+        VStack(spacing: 3) {
             Image(systemName: icon)
-            Text(value).fontWeight(.bold)
-            Text(label).foregroundStyle(.white.opacity(0.72))
+            Text("\(value) \(label)")
+                .fontWeight(.semibold)
         }
-        .font(.subheadline)
-        .foregroundStyle(.white)
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
-        .background(.white.opacity(0.13), in: Capsule())
+        .font(.caption)
+        .foregroundStyle(.white.opacity(0.86))
+        .frame(minWidth: 42)
     }
 
     private func expenseRowView(_ expense: Expense, ledger: Ledger) -> some View {

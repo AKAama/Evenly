@@ -50,7 +50,8 @@ class AuthManager: ObservableObject {
                 self.user = user
                 self.userProfile = UserProfile(
                     id: user.id,
-                    username: user.displayName,
+                    username: user.username,
+                    name: user.displayName,
                     email: user.email,
                     phone: nil,
                     avatarUrl: user.avatarUrl
@@ -122,7 +123,8 @@ class AuthManager: ObservableObject {
                     self.user = user
                     self.userProfile = UserProfile(
                         id: user.id,
-                        username: user.displayName,
+                        username: user.username,
+                        name: user.displayName,
                         email: user.email,
                         phone: nil,
                         avatarUrl: user.avatarUrl
@@ -145,6 +147,7 @@ class AuthManager: ObservableObject {
 
     func signUp(
         username: String,
+        displayName: String,
         email: String,
         phone: String,
         password: String,
@@ -158,9 +161,10 @@ class AuthManager: ObservableObject {
                 // Build form data
                 let formFields: [String: String] = [
                     "email": email,
+                    "username": username,
                     "password": password,
                     "code": verificationCode,
-                    "display_name": username
+                    "display_name": displayName
                 ]
 
                 let response: RegisterResponse = try await api.requestWithFormData(
@@ -181,7 +185,8 @@ class AuthManager: ObservableObject {
                     self.user = user
                     self.userProfile = UserProfile(
                         id: user.id,
-                        username: user.displayName,
+                        username: user.username,
+                        name: user.displayName,
                         email: user.email,
                         phone: phone,
                         avatarUrl: user.avatarUrl
@@ -286,7 +291,8 @@ class AuthManager: ObservableObject {
                     self.avatarImage = UIImage(data: imageData)
                     self.userProfile = UserProfile(
                         id: updatedUser.id,
-                        username: updatedUser.displayName,
+                        username: updatedUser.username,
+                        name: updatedUser.displayName,
                         email: updatedUser.email,
                         phone: self.userProfile?.phone,
                         avatarUrl: updatedUser.avatarUrl
@@ -312,7 +318,8 @@ class AuthManager: ObservableObject {
                     self.user = updatedUser
                     self.userProfile = UserProfile(
                         id: updatedUser.id,
-                        username: updatedUser.displayName,
+                        username: updatedUser.username,
+                        name: updatedUser.displayName,
                         email: updatedUser.email,
                         phone: self.userProfile?.phone,
                         avatarUrl: updatedUser.avatarUrl
@@ -437,12 +444,13 @@ class AuthManager: ObservableObject {
 struct UserProfile {
     let id: String
     let username: String?
+    let name: String?
     let email: String?
     let phone: String?
     let avatarUrl: String?
 
     var displayName: String {
-        username ?? email?.components(separatedBy: "@").first ?? "用户"
+        name ?? username ?? email?.components(separatedBy: "@").first ?? "用户"
     }
 
 }

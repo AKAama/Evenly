@@ -112,186 +112,239 @@ struct LedgerDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if let ledger = ledger {
-                List {
-                    Section(header: Text("账单")) {
-                        ForEach(ledger.expenses) { expense in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text(expense.title)
-                                        .font(.headline)
-                                        .dynamicTypeSize(.accessibility2)
-                                    Spacer()
-                                    Text(formatAmount(expense.amount))
-                                        .font(.headline)
-                                        .foregroundStyle(.blue)
-                                }
-                                HStack {
-                                    Text("付款人: \(expense.payer.name)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                                HStack {
-                                    Text("参与人: \(expense.participants.map { $0.name }.joined(separator: ", "))")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                                
-                                // 确认状态显示
-                                if !expense.confirmations.isEmpty {
-                                    Divider()
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("确认状态")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        ForEach(expense.participants) { participant in
-                                            ConfirmationStatusRow(
-                                                participant: participant,
-                                                status: expense.confirmationStatus(for: participant)
-                                            )
-                                        }
-                                    }
-                                }
-                                
-                                Divider()
-                            }
-                            .padding(.vertical, 4)
-                            .swipeActions(edge: .trailing) {
-                                if expense.createdBy == auth.user?.id {
-                                    Button(role: .destructive) {
-                                        HapticManager.impact(.light)
-                                        expenseToDelete = expense
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
-                                    }
-                                }
-                            }
-                            .listRowAnimation()
-                        }
-                        
-                        if ledger.expenses.isEmpty {
-                            Text("暂无账单记录")
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 20)
-                        }
-                    }
-                    
-                    Section(header: Text("分账结果")) {
-                        ForEach(balanceResults) { result in
-                            HStack {
-                                Text(result.person.name)
-                                    .font(.headline)
-                                Spacer()
-                                VStack(alignment: .trailing) {
-                                    Text(result.displayText)
-                                        .font(.subheadline)
-                                        .foregroundColor(result.isPositive ? .green : result.balance < 0 ? .red : .secondary)
-                                    Text(formatAmount(result.balance))
-                                        .font(.headline)
-                                        .foregroundColor(result.isPositive ? .green : result.balance < 0 ? .red : .secondary)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    
-                    Section(header: Text("结算转账方案")) {
-                        if transfers.isEmpty {
-                            Text("暂无需要结算的转账")
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(transfers) { transfer in
-                                HStack {
-                                    Text("\(transfer.from.name) → \(transfer.to.name)")
-                                    Spacer()
-                                    Text(formatAmount(transfer.amount))
-                                        .font(.headline)
-                                }
-                                .padding(.vertical, 4)
+        contentWithAlerts
+    }
+
+    private var contentWithAlerts: some View {
+        contentWithSheet
+            .alert("删除账本", isPresented: $showingDeleteLedgerAlert) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) {
+                    if let ledger = ledger {
+                        store.deleteLedger(ledger) { error in
+                            if let error {
+                                deleteError = error.localizedDescription
                             }
                         }
                     }
                 }
-                .navigationTitle(ledger.title)
-            } else {
-                Text("账本不存在")
+            } message: {
+                Text("确定要删除账本「\(ledger?.title ?? "")」吗？此操作不可撤销。")
+            }
+            .alert(
+                "删除账单",
+                isPresented: Binding(
+                    get: { expenseToDelete != nil },
+                    set: { if !$0 { expenseToDelete = nil } }
+                ),
+                presenting: expenseToDelete
+            ) { _ in
+                Button("删除", role: .destructive) {
+                    if let expense = expenseToDelete {
+                        performDeleteExpense(expense)
+                    }
+                }
+                Button("取消", role: .cancel) {
+                    expenseToDelete = nil
+                }
+            } message: { _ in
+                Text(deleteExpenseMessage)
+            }
+            .alert("操作失败", isPresented: showingDeleteError) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
+            }
+    }
+
+    private var contentWithSheet: some View {
+        contentWithToolbar
+            .sheet(isPresented: $showingAddExpense) {
+                addExpenseSheet
+            }
+    }
+
+    private var contentWithToolbar: some View {
+        contentRoot
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button {
+                            showingAddExpense = true
+                        } label: {
+                            Label("添加账单", systemImage: "plus.circle")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showingDeleteLedgerAlert = true
+                        } label: {
+                            Label("删除账本", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var contentRoot: some View {
+        if let ledger = ledger {
+            List {
+                expenseSection(ledger)
+                balanceSection
+                transferSection
+            }
+            .navigationTitle(ledger.title)
+        } else {
+            Text("账本不存在")
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func expenseSection(_ ledger: Ledger) -> some View {
+        Section(header: Text("账单")) {
+            if ledger.expenses.isEmpty {
+                Text("暂无账单记录")
                     .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                ForEach(ledger.expenses) { expense in
+                    expenseRow(expense)
+                }
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        showingAddExpense = true
-                    } label: {
-                        Label("添加账单", systemImage: "plus.circle")
+    }
+
+    private func expenseRow(_ expense: Expense) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(expense.title)
+                    .font(.headline)
+                    .dynamicTypeSize(.accessibility2)
+                Spacer()
+                Text(formatAmount(expense.amount))
+                    .font(.headline)
+                    .foregroundStyle(.blue)
+            }
+            HStack {
+                Text("付款人: \(expense.payer.name)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            HStack {
+                Text("参与人: \(expense.participants.map { $0.name }.joined(separator: ", "))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if !expense.confirmations.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("确认状态")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(expense.participants) { participant in
+                        ConfirmationStatusRow(
+                            participant: participant,
+                            status: expense.confirmationStatus(for: participant)
+                        )
                     }
-                    
-                    Divider()
-                    
-                    Button(role: .destructive) {
-                        showingDeleteLedgerAlert = true
-                    } label: {
-                        Label("删除账本", systemImage: "trash")
-                    }
+                }
+            }
+
+            Divider()
+        }
+        .padding(.vertical, 4)
+        .swipeActions(edge: .trailing) {
+            if expense.createdBy == auth.user?.id {
+                Button(role: .destructive) {
+                    HapticManager.impact(.light)
+                    expenseToDelete = expense
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Label("删除", systemImage: "trash")
                 }
             }
         }
-        .alert("删除账本", isPresented: $showingDeleteLedgerAlert) {
-            Button("取消", role: .cancel) {}
-            Button("删除", role: .destructive) {
-                if let ledger = ledger {
-                    store.deleteLedger(ledger) { result in
-                        if case .failure(let error) = result {
-                            deleteError = error.localizedDescription
-                        }
+        .listRowAnimation()
+    }
+
+    private var balanceSection: some View {
+        Section(header: Text("分账结果")) {
+            ForEach(balanceResults) { result in
+                balanceRow(result)
+            }
+        }
+    }
+
+    private func balanceRow(_ result: BalanceResult) -> some View {
+        let color: Color = result.isPositive ? .green : result.balance < 0 ? .red : .secondary
+        return HStack {
+            Text(result.person.name)
+                .font(.headline)
+            Spacer()
+            VStack(alignment: .trailing) {
+                Text(result.displayText)
+                    .font(.subheadline)
+                    .foregroundColor(color)
+                Text(formatAmount(result.balance))
+                    .font(.headline)
+                    .foregroundColor(color)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var transferSection: some View {
+        Section(header: Text("结算转账方案")) {
+            if transfers.isEmpty {
+                Text("暂无需要结算的转账")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(transfers) { transfer in
+                    HStack {
+                        Text("\(transfer.from.name) → \(transfer.to.name)")
+                        Spacer()
+                        Text(formatAmount(transfer.amount))
+                            .font(.headline)
                     }
+                    .padding(.vertical, 4)
                 }
             }
-        } message: {
-            Text("确定要删除账本「\(ledger?.title ?? "")」吗？此操作不可撤销。")
         }
-        .alert("删除账单", presenting: $expenseToDelete) { expense in
-            Button("删除", role: .destructive) {
-                performDeleteExpense(expense)
+    }
+
+    @ViewBuilder
+    private var addExpenseSheet: some View {
+        if let ledger = ledger {
+            AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id) { newExpense in
+                await submitAddExpense(newExpense, to: ledger)
             }
-            Button("取消", role: .cancel) {
-                expenseToDelete = nil
-            }
-        } message: { _ in
-            Text(deleteExpenseMessage)
         }
-        .alert("操作失败", isPresented: $showingDeleteError) {
-            Button("确定", role: .cancel) {}
-        } message: {
-            Text(deleteError ?? "")
+    }
+
+    private func submitAddExpense(_ expense: Expense, to ledger: Ledger) async -> Result<Void, Error> {
+        guard !expense.title.isEmpty else {
+            return .failure(NSError(
+                domain: "AddExpense",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "请输入账单名称"]
+            ))
         }
-        .sheet(isPresented: $showingAddExpense) {
-            if let ledger = ledger {
-                AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id) { newExpense in
-                    guard !newExpense.title.isEmpty else {
-                        return .failure(NSError(
-                            domain: "AddExpense",
-                            code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "请输入账单名称"]
-                        ))
-                    }
-                    return await withCheckedContinuation { continuation in
-                        store.addExpense(newExpense, to: ledger) { result in
-                            switch result {
-                            case .success:
-                                continuation.resume(returning: .success(()))
-                            case .failure(let error):
-                                continuation.resume(returning: .failure(error))
-                            }
-                        }
-                    }
+        return await withCheckedContinuation { continuation in
+            store.addExpense(expense, to: ledger) { result in
+                switch result {
+                case .success:
+                    continuation.resume(returning: .success(()))
+                case .failure(let error):
+                    continuation.resume(returning: .failure(error))
                 }
             }
         }

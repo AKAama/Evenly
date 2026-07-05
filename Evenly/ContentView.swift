@@ -76,6 +76,75 @@ struct ContentView: View {
     }
 
     var body: some View {
+        contentWithAlerts
+    }
+
+    private var contentWithAlerts: some View {
+        contentWithSheet
+            .alert("操作失败", isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text(actionError ?? "")
+            }
+            .alert("退出账本", isPresented: $showingLeaveLedgerAlert) {
+                Button("取消", role: .cancel) {}
+                Button("退出", role: .destructive) {
+                    if let ledger = ledgerStore.currentLedger {
+                        leaveLedger(ledger)
+                    }
+                }
+            } message: {
+                Text("退出后将无法继续查看该账本。")
+            }
+            .confirmationDialog(
+                settlementConfirmTitle,
+                isPresented: Binding(
+                    get: { settlementToConfirm != nil },
+                    set: { if !$0 { settlementToConfirm = nil; pendingSettlementLedgerId = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button(settlementConfirmConfirmLabel, role: .destructive) {
+                    confirmSettlementFromDialog()
+                }
+                Button("取消", role: .cancel) {
+                    settlementToConfirm = nil
+                    pendingSettlementLedgerId = nil
+                }
+            } message: {
+                Text(settlementConfirmMessage)
+            }
+            .alert(
+                "删除账单",
+                isPresented: Binding(
+                    get: { expenseToDelete != nil },
+                    set: { if !$0 { expenseToDelete = nil; expenseDeleteLedgerId = nil } }
+                ),
+                presenting: expenseToDelete
+            ) { _ in
+                Button("删除", role: .destructive) {
+                    confirmDeleteExpense()
+                }
+                Button("取消", role: .cancel) {
+                    expenseToDelete = nil
+                    expenseDeleteLedgerId = nil
+                }
+            } message: { _ in
+                Text(expenseDeleteMessage)
+            }
+    }
+
+    private var contentWithSheet: some View {
+        contentRoot
+            .sheet(item: $sheetType) { item in
+                sheetContent(for: item)
+            }
+    }
+
+    private var contentRoot: some View {
         Group {
             if auth.user != nil {
                 TabView(selection: $selectedTab) {
@@ -85,7 +154,6 @@ struct ContentView: View {
                         }
                         .tag(0)
                         .onAppear {
-                            // Use user ID from AuthManager
                             if let userId = auth.user?.id {
                                 ledgerStore.bind(userId: userId)
                             }
@@ -113,97 +181,63 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(themeManager.applyTheme())
-        .sheet(item: $sheetType) { item in
-            switch item {
-            case .ledgerDrawer:
-                LedgerDrawerView(
-                    showingAddLedger: { sheetType = .addLedger }
-                )
+    }
+
+    @ViewBuilder
+    private func sheetContent(for item: SheetType) -> some View {
+        switch item {
+        case .ledgerDrawer:
+            LedgerDrawerView(
+                showingAddLedger: { sheetType = .addLedger }
+            )
+            .environmentObject(auth)
+            .environmentObject(ledgerStore)
+
+        case .addLedger:
+            AddLedgerView { _ in }
                 .environmentObject(auth)
                 .environmentObject(ledgerStore)
 
-            case .addLedger:
-                AddLedgerView { newLedger in
-                    // 回调由 AddLedgerView 自己处理
-                }
+        case .addExpense:
+            addExpenseSheet
+
+        case .memberManagement(let ledger):
+            AddMemberView(ledgerId: ledger.id)
                 .environmentObject(auth)
                 .environmentObject(ledgerStore)
 
-            case .addExpense:
-                if let ledger = ledgerStore.currentLedger {
-                    AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id) { newExpense in
-                        await withCheckedContinuation { continuation in
-                            ledgerStore.addExpense(newExpense, to: ledger) { result in
-                                switch result {
-                                case .success:
-                                    loadSettlementData(for: ledger)
-                                    continuation.resume(returning: .success(()))
-                                case .failure(let error):
-                                    continuation.resume(returning: .failure(error))
-                                }
-                            }
-                        }
-                    }
+        case .memberList(let ledger):
+            NavigationStack { LedgerMembersView(ledger: ledger) }
+
+        case .expenseDetail(let expense, let ledger):
+            NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
+        }
+    }
+
+    @ViewBuilder
+    private var addExpenseSheet: some View {
+        if let ledger = ledgerStore.currentLedger {
+            AddExpenseView(
+                participants: ledger.participants,
+                currentUserId: auth.user?.id,
+                onSave: { newExpense in
+                    await submitAddExpense(newExpense, to: ledger)
                 }
-
-            case .memberManagement(let ledger):
-                AddMemberView(ledgerId: ledger.id)
-                    .environmentObject(auth)
-                    .environmentObject(ledgerStore)
-
-            case .memberList(let ledger):
-                NavigationStack { LedgerMembersView(ledger: ledger) }
-
-            case .expenseDetail(let expense, let ledger):
-                NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
-            }
+            )
         }
-        .alert("操作失败", isPresented: Binding(
-            get: { actionError != nil },
-            set: { if !$0 { actionError = nil } }
-        )) {
-            Button("确定", role: .cancel) {}
-        } message: {
-            Text(actionError ?? "")
-        }
-        .alert("退出账本", isPresented: $showingLeaveLedgerAlert) {
-            Button("取消", role: .cancel) {}
-            Button("退出", role: .destructive) {
-                if let ledger = ledgerStore.currentLedger {
-                    leaveLedger(ledger)
+    }
+
+    private func submitAddExpense(_ expense: Expense, to ledger: Ledger) async -> Result<Void, Error> {
+        await withCheckedContinuation { continuation in
+            ledgerStore.addExpense(expense, to: ledger) { result in
+                switch result {
+                case .success:
+                    loadSettlementData(for: ledger)
+                    continuation.resume(returning: .success(()))
+                case .failure(let error):
+                    continuation.resume(returning: .failure(error))
                 }
             }
-        } message: {
-            Text("退出后将无法继续查看该账本。")
-        }
-        .confirmationDialog(
-            settlementConfirmTitle,
-            isPresented: Binding(
-                get: { settlementToConfirm != nil },
-                set: { if !$0 { settlementToConfirm = nil; pendingSettlementLedgerId = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(settlementConfirmConfirmLabel, role: .destructive) {
-                confirmSettlementFromDialog()
-            }
-            Button("取消", role: .cancel) {
-                settlementToConfirm = nil
-                pendingSettlementLedgerId = nil
-            }
-        } message: {
-            Text(settlementConfirmMessage)
-        }
-        .alert("删除账单", presenting: $expenseToDelete) { expense in
-            Button("删除", role: .destructive) {
-                confirmDeleteExpense()
-            }
-            Button("取消", role: .cancel) {
-                expenseToDelete = nil
-                expenseDeleteLedgerId = nil
-            }
-        } message: { _ in
-            Text(expenseDeleteMessage)
         }
     }
 
@@ -378,32 +412,31 @@ struct ContentView: View {
         }
     }
 
-    private func ledgerDetailView(_ ledger: Ledger) -> some View {
-        let filteredExpenses: [Expense] = {
-            let scopedExpenses: [Expense]
-            if let userId = auth.user?.id {
-                switch expenseFilter {
-                case .involvingMe:
-                    scopedExpenses = ledger.expenses.filter { expense in
-                        expense.participants.contains { $0.userId == userId }
-                    }
-                case .createdByMe:
-                    scopedExpenses = ledger.expenses.filter { $0.createdBy == userId }
-                case .all:
-                    scopedExpenses = ledger.expenses
+    private func filteredExpenses(for ledger: Ledger) -> [Expense] {
+        let scopedExpenses: [Expense]
+        if let userId = auth.user?.id {
+            switch expenseFilter {
+            case .involvingMe:
+                scopedExpenses = ledger.expenses.filter { expense in
+                    expense.participants.contains { $0.userId == userId }
                 }
-            } else {
+            case .createdByMe:
+                scopedExpenses = ledger.expenses.filter { $0.createdBy == userId }
+            case .all:
                 scopedExpenses = ledger.expenses
             }
+        } else {
+            scopedExpenses = ledger.expenses
+        }
+        guard !searchText.isEmpty else { return scopedExpenses }
+        return scopedExpenses.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText) ||
+            $0.payer.name.localizedCaseInsensitiveContains(searchText)
+        }
+    }
 
-            guard !searchText.isEmpty else { return scopedExpenses }
-            return scopedExpenses.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText) ||
-                $0.payer.name.localizedCaseInsensitiveContains(searchText)
-            }
-        }()
-        
-        return List {
+    private func ledgerDetailView(_ ledger: Ledger) -> some View {
+        List {
             Section {
                 ledgerOverviewCard(ledger)
                     .listRowInsets(EdgeInsets())
@@ -411,158 +444,186 @@ struct ContentView: View {
                     .listRowSeparator(.hidden)
             }
 
-            Section {
-                if ledger.expenses.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.tertiary)
-                        Text("暂无账单")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        Text("点击右上角添加第一笔账单")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
-                } else if filteredExpenses.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: searchText.isEmpty ? "person.crop.circle.badge.questionmark" : "magnifyingglass")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.tertiary)
-                        Text(searchText.isEmpty ? expenseFilter.emptyTitle : "未找到匹配的账单")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
-                } else {
-                    ForEach(filteredExpenses) { expense in
-                        expenseRowView(expense, ledger: ledger)
-                            .listRowAnimation()
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                sheetType = .expenseDetail(expense, ledger)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                if expense.createdBy == auth.user?.id {
-                                    Button(role: .destructive) {
-                                        HapticManager.impact(.light)
-                                        expenseToDelete = expense
-                                        expenseDeleteLedgerId = ledger.id
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
-                                    }
-                                }
-                            }
-                    }
-	                }
-            } header: {
-                HStack {
-                    Text("账单")
-                    Spacer()
-                    Button {
-                        expenseFilter = expenseFilter.next
-                        HapticManager.selection.selectionChanged()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(expenseFilter.rawValue)
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
-                }
-                .textCase(nil)
-            }
-
-            let mine = mySettlements(in: ledger)
-            if isLoadingSettlementData || settlementError != nil || !mine.isEmpty {
-                Section {
-                    if isLoadingSettlementData {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
-                    } else if let settlementError {
-                        Label(settlementError, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                    } else {
-                        ForEach(mine) { settlement in
-                            mySettlementRow(settlement, ledger: ledger)
-                        }
-                    }
-                } header: {
-                    Text("与我相关的待结算")
-                } footer: {
-                    Text("只显示需要你付款或收款的项目，完成转账后点击右侧勾选")
-                }
-            }
-
-            Section {
-                if settlementHistory.isEmpty {
-                    Text("暂无结算记录")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(SettlementHistory.merging(settlementHistory)) { settlement in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(settlement.fromUserName) → \(settlement.toUserName)")
-                                    .font(.subheadline)
-                                if let settledAt = settlement.settledAt {
-                                    Text(formatDate(settledAt))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(formatAmount(settlement.amount))
-                                .font(.headline)
-                        }
-                    }
-                }
-            } header: {
-                Text("已结算记录")
-            } footer: {
-                Text("这里保存已标记完成的转账")
-            }
-
-            Section {
-                NavigationLink {
-                    SettlementDetailView(
-                        ledger: ledger,
-                        suggestions: settlementSuggestions
-                    )
-                } label: {
-                    HStack {
-                        Label("查看全部结算方案", systemImage: "list.bullet.rectangle.portrait")
-                        Spacer()
-                        if !settlementSuggestions.isEmpty {
-                            Text("\(settlementSuggestions.count) 笔")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-	        }
-	        .listStyle(.insetGrouped)
-	        .scrollDismissesKeyboard(.interactively)
-            .onAppear {
-                if loadedSettlementLedgerId != ledger.id {
-                    loadedSettlementLedgerId = ledger.id
-                    loadSettlementData(for: ledger)
-                }
-            }
-            .onChange(of: ledger.id) { _, _ in
+            expenseListSection(ledger)
+            mySettlementSection(ledger)
+            settlementHistorySection
+            allSettlementsLinkSection(ledger)
+        }
+        .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .onAppear {
+            if loadedSettlementLedgerId != ledger.id {
                 loadedSettlementLedgerId = ledger.id
                 loadSettlementData(for: ledger)
             }
-	    }
+        }
+        .onChange(of: ledger.id) { _, _ in
+            loadedSettlementLedgerId = ledger.id
+            loadSettlementData(for: ledger)
+        }
+    }
+
+    @ViewBuilder
+    private func expenseListSection(_ ledger: Ledger) -> some View {
+        let expenses = filteredExpenses(for: ledger)
+        Section {
+            if ledger.expenses.isEmpty {
+                emptyExpensesPlaceholder
+            } else if expenses.isEmpty {
+                noMatchingExpensesPlaceholder
+            } else {
+                ForEach(expenses) { expense in
+                    expenseListRow(expense, ledger: ledger)
+                }
+            }
+        } header: {
+            expenseSectionHeader
+        }
+    }
+
+    private func expenseListRow(_ expense: Expense, ledger: Ledger) -> some View {
+        expenseRowView(expense, ledger: ledger)
+            .listRowAnimation()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                sheetType = .expenseDetail(expense, ledger)
+            }
+            .swipeActions(edge: .trailing) {
+                if expense.createdBy == auth.user?.id {
+                    Button(role: .destructive) {
+                        HapticManager.impact(.light)
+                        expenseToDelete = expense
+                        expenseDeleteLedgerId = ledger.id
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                }
+            }
+    }
+
+    private var emptyExpensesPlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("暂无账单")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("点击右上角添加第一笔账单")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+    }
+
+    private var noMatchingExpensesPlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: searchText.isEmpty ? "person.crop.circle.badge.questionmark" : "magnifyingglass")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text(searchText.isEmpty ? expenseFilter.emptyTitle : "未找到匹配的账单")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+    }
+
+    private var expenseSectionHeader: some View {
+        HStack {
+            Text("账单")
+            Spacer()
+            Button {
+                expenseFilter = expenseFilter.next
+                HapticManager.selection.selectionChanged()
+            } label: {
+                HStack(spacing: 4) {
+                    Text(expenseFilter.rawValue)
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .font(.caption)
+                .fontWeight(.medium)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.blue)
+        }
+        .textCase(nil)
+    }
+
+    @ViewBuilder
+    private func mySettlementSection(_ ledger: Ledger) -> some View {
+        let mine = mySettlements(in: ledger)
+        if isLoadingSettlementData || settlementError != nil || !mine.isEmpty {
+            Section {
+                if isLoadingSettlementData {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if let err = settlementError {
+                    Label(err, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                } else {
+                    ForEach(mine) { settlement in
+                        mySettlementRow(settlement, ledger: ledger)
+                    }
+                }
+            } header: {
+                Text("与我相关的待结算")
+            } footer: {
+                Text("只显示需要你付款或收款的项目，完成转账后点击右侧勾选")
+            }
+        }
+    }
+
+    private var settlementHistorySection: some View {
+        Section {
+            if settlementHistory.isEmpty {
+                Text("暂无结算记录")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(SettlementHistory.merging(settlementHistory)) { settlement in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(settlement.fromUserName) → \(settlement.toUserName)")
+                                .font(.subheadline)
+                            if let settledAt = settlement.settledAt {
+                                Text(formatDate(settledAt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text(formatAmount(settlement.amount))
+                            .font(.headline)
+                    }
+                }
+            }
+        } header: {
+            Text("已结算记录")
+        } footer: {
+            Text("这里保存已标记完成的转账")
+        }
+    }
+
+    private func allSettlementsLinkSection(_ ledger: Ledger) -> some View {
+        Section {
+            NavigationLink {
+                SettlementDetailView(
+                    ledger: ledger,
+                    suggestions: settlementSuggestions
+                )
+            } label: {
+                HStack {
+                    Label("查看全部结算方案", systemImage: "list.bullet.rectangle.portrait")
+                    Spacer()
+                    if !settlementSuggestions.isEmpty {
+                        Text("\(settlementSuggestions.count) 笔")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
 
     private func ledgerOverviewCard(_ ledger: Ledger) -> some View {
         let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.amount }

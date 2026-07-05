@@ -194,13 +194,14 @@ struct ContentView: View {
                             Label("添加账单", systemImage: "plus.circle")
                         }
 
-                        Button {
-                            HapticManager.impact(.medium)
-                            if let currentLedger = ledgerStore.currentLedger {
+                        if let currentLedger = ledgerStore.currentLedger,
+                           currentLedger.ownerId == auth.user?.id {
+                            Button {
+                                HapticManager.impact(.medium)
                                 sheetType = .memberManagement(currentLedger)
+                            } label: {
+                                Label("管理成员", systemImage: "person.badge.plus")
                             }
-                        } label: {
-                            Label("管理成员", systemImage: "person.badge.plus")
                         }
 
                         if let currentLedger = ledgerStore.currentLedger,
@@ -289,14 +290,17 @@ struct ContentView: View {
                     ForEach(filteredExpenses) { expense in
                         expenseRowView(expense, ledger: ledger)
                             .listRowAnimation()
+                            .swipeActions(edge: .trailing) {
+                                if expense.createdBy == auth.user?.id {
+                                    Button(role: .destructive) {
+                                        HapticManager.notificationOccurred(.warning)
+                                        ledgerStore.deleteExpense(expense, from: ledger) { _ in }
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
-	                    .onDelete { indexSet in
-	                        HapticManager.notificationOccurred(.warning)
-	                        for index in indexSet.sorted(by: >) {
-	                            let expense = filteredExpenses[index]
-	                            ledgerStore.deleteExpense(expense, from: ledger) { _ in }
-	                        }
-	                    }
 	                }
             } header: {
                 Text("账单")

@@ -10,6 +10,7 @@ import SwiftUI
 
 struct AddMemberView: View {
     @EnvironmentObject var ledgerStore: LedgerStore
+    @EnvironmentObject var auth: AuthManager
     @Environment(\.dismiss) var dismiss
     let ledgerId: UUID
 
@@ -226,12 +227,14 @@ struct AddMemberView: View {
 
             Spacer()
 
-            Button(role: .destructive) {
-                HapticManager.notificationOccurred(.warning)
-                deleteMember(participant)
-            } label: {
-                Image(systemName: "trash")
-                    .foregroundStyle(.red)
+            if auth.user?.id == ledger.ownerId, participant.userId != ledger.ownerId {
+                Button(role: .destructive) {
+                    HapticManager.notificationOccurred(.warning)
+                    deleteMember(participant)
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                }
             }
         }
     }
@@ -583,4 +586,5 @@ struct MemberRowView: View {
 #Preview {
     AddMemberView(ledgerId: UUID())
     .environmentObject(LedgerStore())
+    .environmentObject(AuthManager())
 }

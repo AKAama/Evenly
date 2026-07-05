@@ -54,13 +54,6 @@ struct LedgerDrawerView: View {
                             ledgerRowView(ledger)
                                 .listRowAnimation()
                         }
-                        .onDelete { indexSet in
-                            HapticManager.notificationOccurred(.warning)
-                            for index in indexSet.sorted(by: >) {
-                                let ledger = filteredLedgers[index]
-                                ledgerStore.deleteLedger(ledger)
-                            }
-                        }
                     }
                 } header: {
                     Text("我的账本")
@@ -158,11 +151,13 @@ struct LedgerDrawerView: View {
             dismiss()
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                HapticManager.notificationOccurred(.warning)
-                ledgerStore.deleteLedger(ledger)
-            } label: {
-                Label("删除", systemImage: "trash")
+            if ledger.ownerId == auth.user?.id {
+                Button(role: .destructive) {
+                    HapticManager.notificationOccurred(.warning)
+                    ledgerStore.deleteLedger(ledger)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
             }
         }
         .contextMenu {
@@ -173,12 +168,14 @@ struct LedgerDrawerView: View {
                 Label("设为当前", systemImage: "checkmark.circle")
             }
             
-            Button(role: .destructive) {
-                HapticManager.notificationOccurred(.warning)
-                ledgerToDelete = ledger
-                showingDeleteConfirmation = true
-            } label: {
-                Label("删除", systemImage: "trash")
+            if ledger.ownerId == auth.user?.id {
+                Button(role: .destructive) {
+                    HapticManager.notificationOccurred(.warning)
+                    ledgerToDelete = ledger
+                    showingDeleteConfirmation = true
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
             }
         }
         .padding(.vertical, 4)

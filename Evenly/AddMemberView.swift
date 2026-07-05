@@ -208,13 +208,30 @@ struct AddMemberView: View {
     private func memberRowView(_ participant: Person) -> some View {
         HStack(spacing: 12) {
             memberAvatar(for: participant)
-            
+                .opacity(participant.isPending ? 0.55 : 1.0)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text(participant.name)
-                    .font(.body)
-                    .dynamicTypeSize(.accessibility2)
-                
-                if participant.userId != nil {
+                HStack(spacing: 6) {
+                    Text(participant.name)
+                        .font(.body)
+                        .dynamicTypeSize(.accessibility2)
+                        .foregroundStyle(participant.isPending ? .secondary : .primary)
+                    if participant.isPending {
+                        Text("邀请中")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                if participant.isPending {
+                    Text("等待对方接受邀请")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if participant.userId != nil {
                     Text("已注册用户")
                         .font(.caption)
                         .foregroundStyle(.green)

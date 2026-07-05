@@ -243,6 +243,16 @@ struct ForgotPasswordView: View {
                     Section("新密码") {
                         SecureField("新密码（至少 6 位）", text: $newPassword)
                         SecureField("再次输入新密码", text: $confirmPassword)
+                        if !confirmPassword.isEmpty && newPassword != confirmPassword {
+                            Text("两次输入的密码不一致")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                        if !newPassword.isEmpty && newPassword.count < 6 {
+                            Text("密码至少 6 位")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
                 if let message { Section { Text(message).foregroundStyle(.secondary) } }
@@ -252,8 +262,14 @@ struct ForgotPasswordView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(codeSent ? "重置" : "发送验证码") { submit() }
-                        .disabled(!canSubmit || isLoading)
+                    Button { submit() } label: {
+                        if isLoading {
+                            ProgressView()
+                        } else {
+                            Text(codeSent ? "重置" : "发送验证码")
+                        }
+                    }
+                    .disabled(!canSubmit || isLoading)
                 }
             }
         }

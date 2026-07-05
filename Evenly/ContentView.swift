@@ -23,6 +23,8 @@ struct ContentView: View {
     @State private var isLoadingSettlementData = false
     @State private var settlementError: String?
     @State private var settlementActionIds: Set<String> = []
+    @State private var settlementToConfirm: Settlement?
+    @State private var pendingSettlementLedgerId: UUID?
     @State private var loadedSettlementLedgerId: UUID?
     @State private var respondingExpenseIds: Set<UUID> = []
     @State private var actionError: String?
@@ -173,6 +175,59 @@ struct ContentView: View {
         } message: {
             Text("退出后将无法继续查看该账本。")
         }
+        .confirmationDialog(
+            settlementConfirmTitle,
+            isPresented: Binding(
+                get: { settlementToConfirm != nil },
+                set: { if !$0 { settlementToConfirm = nil; pendingSettlementLedgerId = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(settlementConfirmConfirmLabel, role: .destructive) {
+                confirmSettlementFromDialog()
+            }
+            Button("取消", role: .cancel) {
+                settlementToConfirm = nil
+                pendingSettlementLedgerId = nil
+            }
+        } message: {
+            Text(settlementConfirmMessage)
+        }
+    }
+
+    private var settlementConfirmTitle: String { "确认转账" }
+
+    private var settlementConfirmConfirmLabel: String {
+        guard let s = settlementToConfirm else { return "确认" }
+        return s.fromUserId == auth.user?.id ? "确认已转账" : "确认已收款"
+    }
+
+    private var settlementConfirmMessage: String {
+        guard let s = settlementToConfirm else { return "" }
+        let amount = formatAmount(s.amount)
+        if s.fromUserId == auth.user?.id {
+            return "确认已转账 \(amount) 给 \(s.toUserName)？"
+        } else {
+            return "确认已收到 \(s.fromUserName) 转账 \(amount)？"
+        }
+    }
+
+    private func confirmSettlementFromDialog() {
+        guard let settlement = settlementToConfirm else { return }
+        let ledger: Ledger?
+        if let lid = pendingSettlementLedgerId {
+            ledger = ledgerStore.ledgers.first(where: { $0.id == lid }) ?? ledgerStore.currentLedger
+        } else {
+            ledger = ledgerStore.currentLedger
+        }
+        guard let ledger else {
+            settlementToConfirm = nil
+            pendingSettlementLedgerId = nil
+            return
+        }
+        recordSettlement(settlement, in: ledger)
+        settlementToConfirm = nil
+        pendingSettlementLedgerId = nil
     }
 
     @ViewBuilder
@@ -675,24 +730,20 @@ struct ContentView: View {
         }
     }
 
-    /// 与当前用户相关的结算:我需转给别人的 + 别人需转给我的
+    /// 与当前用户相关的待结算:我需转给别人的 + 别人需转给我的
+    /// 后端返回的 suggestions 已经扣除了已记录的转账金额，这里只需过滤出涉及当前用户的。
     private func mySettlements(in ledger: Ledger) -> [Settlement] {
         guard let me = auth.user?.id else { return [] }
-        let history = SettlementHistory.merging(settlementHistory)
         return settlementSuggestions.compactMap { suggestion in
             guard suggestion.fromUserId == me || suggestion.toUserId == me else { return nil }
-            let settled = history.first {
-                $0.fromUserId == suggestion.fromUserId && $0.toUserId == suggestion.toUserId
-            }?.amount ?? 0
-            let remaining = suggestion.amount - settled
-            guard remaining > 0 else { return nil }
+            guard suggestion.amount > 0 else { return nil }
             return Settlement(
                 id: suggestion.id,
                 fromUserId: suggestion.fromUserId,
                 fromUserName: suggestion.fromUserName,
                 toUserId: suggestion.toUserId,
                 toUserName: suggestion.toUserName,
-                amount: remaining
+                amount: suggestion.amount
             )
         }
     }
@@ -727,7 +778,10 @@ struct ContentView: View {
                 .foregroundStyle(iOwe ? .orange : .green)
 
             Button {
-                recordSettlement(settlement, in: ledger)
+                HapticManager.impact(.light)
+                // Capture the ledger and settlement in the dialog via state
+                pendingSettlementLedgerId = ledger.id
+                settlementToConfirm = settlement
             } label: {
                 if settlementActionIds.contains(settlement.id) {
                     ProgressView()

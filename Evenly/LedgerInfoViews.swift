@@ -11,9 +11,22 @@ struct LedgerMembersView: View {
                     fallbackText: participant.name,
                     size: 42
                 )
+                .opacity(participant.isPending ? 0.55 : 1.0)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(participant.name)
-                        .font(.body)
+                    HStack(spacing: 6) {
+                        Text(participant.name)
+                            .font(.body)
+                            .foregroundStyle(participant.isPending ? .secondary : .primary)
+                        if participant.isPending {
+                            Text("邀请中")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
                     Text(roleText(for: participant))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -39,7 +52,7 @@ struct LedgerMembersView: View {
 
     private func roleText(for participant: Person) -> String {
         if participant.userId == ledger.ownerId { return "账本创建者" }
-        if memberRecord(for: participant)?.status == "pending" { return "邀请中" }
+        if participant.isPending { return "等待对方接受邀请" }
         return participant.isTemporary ? "临时成员" : "成员"
     }
 }

@@ -13,12 +13,20 @@ struct Person: Identifiable, Codable, Hashable {
     /// Backend user ID
     var userId: String?
     var isTemporary: Bool
+    /// Membership status: "active" (joined) or "pending" (invited but not yet accepted)
+    var status: String
 
-    init(id: UUID = UUID(), name: String, userId: String? = nil, isTemporary: Bool = false) {
+    /// True if the person has accepted the invitation and is an active member
+    var isActive: Bool { status == "active" }
+    /// True if the person has been invited but not yet accepted
+    var isPending: Bool { status == "pending" }
+
+    init(id: UUID = UUID(), name: String, userId: String? = nil, isTemporary: Bool = false, status: String = "active") {
         self.id = id
         self.name = name
         self.userId = userId
         self.isTemporary = isTemporary
+        self.status = status
     }
 
     // Create from MemberResponse
@@ -27,6 +35,21 @@ struct Person: Identifiable, Codable, Hashable {
         self.name = member.nickname ?? member.temporaryName ?? member.user?.displayName ?? member.user?.email ?? "Unknown"
         self.userId = member.userId
         self.isTemporary = member.isTemporary
+        self.status = member.status
+    }
+
+    // Custom Decodable so cached data without `status` defaults to "active"
+    enum CodingKeys: String, CodingKey {
+        case id, name, userId, isTemporary, status
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        isTemporary = try container.decodeIfPresent(Bool.self, forKey: .isTemporary) ?? false
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "active"
     }
 }
 

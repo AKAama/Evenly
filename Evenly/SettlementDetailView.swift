@@ -45,9 +45,13 @@ struct SettlementDetailView: View {
                     }
                 }
             } header: {
-                Text("全部待结算")
+                Text("待结算")
             } footer: {
-                Text("系统根据全部未拒绝账单生成完整转账方案，不受结算确认影响")
+                if suggestions.isEmpty {
+                    Text("所有账目已结清 🎉")
+                } else {
+                    Text("系统根据未拒绝账单扣除已记录转账后，给出的待结算转账方案")
+                }
             }
         }
         .navigationTitle("全部结算方案")

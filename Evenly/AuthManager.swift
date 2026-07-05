@@ -376,7 +376,7 @@ class AuthManager: ObservableObject {
     func sendPasswordResetCode(email: String, completion: @escaping (Error?) -> Void) {
         Task {
             do {
-                let _: MessageResponse = try await api.post(APIEndpoints.sendPasswordReset, body: EmailRequest(email: email))
+                let _: MessageResponse = try await api.post(APIEndpoints.sendPasswordReset, body: EmailRequest(email: email), requiresAuth: false)
                 await MainActor.run { completion(nil) }
             } catch { await MainActor.run { completion(error) } }
         }
@@ -386,7 +386,7 @@ class AuthManager: ObservableObject {
         Task {
             do {
                 let request = PasswordResetRequest(email: email, code: code, newPassword: newPassword)
-                let _: MessageResponse = try await api.post(APIEndpoints.resetPassword, body: request)
+                let _: MessageResponse = try await api.post(APIEndpoints.resetPassword, body: request, requiresAuth: false)
                 await MainActor.run { completion(nil) }
             } catch { await MainActor.run { completion(error) } }
         }

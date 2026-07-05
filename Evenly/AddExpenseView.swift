@@ -27,10 +27,13 @@ struct AddExpenseView: View {
     let currentUserId: String?
     var onSave: @MainActor (Expense) async -> Result<Void, Error>
     private let existingId: UUID?
+    /// 已加入的注册成员（可作为付款人）
     private var registeredParticipants: [Person] {
-        participants.filter { participant in
-            !participant.isTemporary && participant.userId?.isEmpty == false
-        }
+        participants.filter { $0.isActive && !$0.isTemporary && ($0.userId?.isEmpty == false) }
+    }
+    /// 可作为参与人分摊的成员：所有已加入的人（包括临时成员）
+    private var selectableParticipants: [Person] {
+        participants.filter { $0.isActive }
     }
     private var selectedPayer: Person? {
         guard let selectedPayerId else { return nil }
@@ -46,10 +49,15 @@ struct AddExpenseView: View {
         if let amount = expense?.amount {
             _amountText = State(initialValue: formatAmountForInput(amount))
         }
-        let defaultPayer = participants.first { $0.userId == currentUserId }
-            ?? participants.first { !$0.isTemporary && $0.userId?.isEmpty == false }
+        // Only active registered members qualify as default payer
+        let activeRegistered = participants.filter { $0.isActive && !$0.isTemporary && $0.userId?.isEmpty == false }
+        let defaultPayer = activeRegistered.first { $0.userId == currentUserId } ?? activeRegistered.first
         _selectedPayerId = State(initialValue: expense?.payer.id ?? defaultPayer?.id)
-        _selectedParticipantIds = State(initialValue: Set(expense?.participants.map(\.id) ?? []))
+        // Default participants: only active members (skip pending invitations)
+        let initialParticipants = expense?.participants ?? (defaultPayer.map { [$0] } ?? [])
+        _selectedParticipantIds = State(initialValue: Set(
+            initialParticipants.filter { $0.isActive }.map(\.id)
+        ))
     }
 
     var body: some View {
@@ -104,16 +112,26 @@ struct AddExpenseView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(participants) { participant in
+                            let selectable = participant.isActive
                             HStack {
                                 Text(participant.name)
                                     .dynamicTypeSize(.accessibility2)
-                                if participant.isTemporary {
+                                    .foregroundStyle(selectable ? .primary : .secondary)
+                                if participant.isPending {
+                                    Text("邀请中")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.secondary.opacity(0.12))
+                                        .clipShape(Capsule())
+                                } else if participant.isTemporary {
                                     Text("临时")
                                         .font(.caption2)
                                         .foregroundStyle(.orange)
                                 }
                                 Spacer()
-                                if selectedParticipantIds.contains(participant.id) {
+                                if selectable, selectedParticipantIds.contains(participant.id) {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(.blue)
                                         .transition(.scale.combined(with: .opacity))
@@ -121,6 +139,7 @@ struct AddExpenseView: View {
                             }
                             .contentShape(Rectangle())
                             .onTapGesture {
+                                guard selectable else { return }
                                 focusedField = nil
                                 toggleParticipant(participant)
                             }
@@ -131,6 +150,13 @@ struct AddExpenseView: View {
                             }
                             if selectedParticipantIds.isEmpty, let first = registeredParticipants.first {
                                 selectedParticipantIds.insert(first.id)
+                            }
+                            // Strip any pre-selected participants that are pending (e.g. if invited after opening)
+                            let pendingIds = Set(participants.filter { !$0.isActive }.map(\.id))
+                            selectedParticipantIds.subtract(pendingIds)
+                            if selectedPayerId.map({ pendingIds.contains($0) }) == true {
+                                selectedPayerId = registeredParticipants.first(where: { $0.userId == currentUserId })?.id
+                                    ?? registeredParticipants.first?.id
                             }
                         }
                     }
@@ -223,7 +249,10 @@ struct AddExpenseView: View {
               payer.userId?.isEmpty == false else { return }
 
         selectedParticipantIds.insert(payer.id)
-        let selectedParticipants = participants.filter { selectedParticipantIds.contains($0.id) }
+        // Final safety filter: never send pending-invitation members as participants/payers
+        let selectedParticipants = participants.filter {
+            $0.isActive && selectedParticipantIds.contains($0.id)
+        }
         guard !selectedParticipants.isEmpty else { return }
 
         errorMessage = nil

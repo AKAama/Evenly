@@ -81,6 +81,14 @@ struct ContentView: View {
 
     private var contentWithAlerts: some View {
         contentWithSheet
+            .sheet(isPresented: Binding(
+                get: { auth.user?.usernameIsGenerated == true },
+                set: { _ in }
+            )) {
+                UsernameSetupView(required: true)
+                    .environmentObject(auth)
+                    .interactiveDismissDisabled()
+            }
             .alert("操作失败", isPresented: Binding(
                 get: { actionError != nil },
                 set: { if !$0 { actionError = nil } }
@@ -815,23 +823,14 @@ struct ContentView: View {
     private func loadSettlementData(for ledger: Ledger) {
         isLoadingSettlementData = true
         settlementError = nil
-
-        ledgerStore.fetchSettlements(for: ledger) { result in
+        ledgerStore.fetchOverview(for: ledger) { result in
+            isLoadingSettlementData = false
             switch result {
-            case .success(let settlements):
-                settlementSuggestions = settlements
+            case .success(let overview):
+                settlementSuggestions = overview.settlementSuggestions.map { Settlement(from: $0) }
+                settlementHistory = overview.settlementHistory.map { SettlementHistory(from: $0) }
             case .failure(let error):
                 settlementError = error.localizedDescription
-            }
-
-            ledgerStore.fetchSettlementHistory(for: ledger) { historyResult in
-                isLoadingSettlementData = false
-                switch historyResult {
-                case .success(let history):
-                    settlementHistory = history
-                case .failure(let error):
-                    settlementError = error.localizedDescription
-                }
             }
         }
     }

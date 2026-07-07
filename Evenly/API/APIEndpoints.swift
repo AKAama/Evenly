@@ -10,6 +10,7 @@ import Foundation
 enum APIEndpoints {
     // MARK: - Auth
     static let login = "/auth/login"
+    static let appleLogin = "/auth/apple"
     static let register = "/auth/register"
     static let sendVerification = "/auth/send-verification"
     static let verifyCode = "/auth/verify-code"
@@ -21,6 +22,10 @@ enum APIEndpoints {
     static let uploadAvatar = "/users/me/avatar"
     static let updateUser = "/users/me"
     static let changePassword = "/users/me/password"
+    static let authMethods = "/users/me/auth-methods"
+    static let updateUsername = "/users/me/username"
+    static let sendPasswordSetup = "/users/me/password/setup/send"
+    static let setupPassword = "/users/me/password/setup"
     static let sendEmailChange = "/users/me/email/send-verification"
     static let changeEmail = "/users/me/email"
     static let deleteAccount = "/users/me"
@@ -32,6 +37,9 @@ enum APIEndpoints {
     static let ledgers = "/ledgers"
     static func ledger(id: String) -> String {
         "/ledgers/\(id)"
+    }
+    static func ledgerOverview(id: String) -> String {
+        "/ledgers/\(id)/overview"
     }
     static func members(ledgerId: String) -> String {
         "/ledgers/\(ledgerId)/members"

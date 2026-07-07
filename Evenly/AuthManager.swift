@@ -8,12 +8,19 @@
 import Foundation
 import SwiftUI
 import Combine
+import AuthenticationServices
+import CryptoKit
+import Security
+import os
 
 class AuthManager: ObservableObject {
+    private static let logger = Logger(subsystem: "com.yhma.Evenly", category: "Authentication")
     @Published var user: UserResponse?
     @Published var userProfile: UserProfile?
     @Published var avatarImage: UIImage?
     @Published var isGuestMode = false
+    @Published private(set) var authMethods: [String] = []
+    @Published private(set) var hasPassword = true
 
     // Login/Register state
     @Published var loginIdentifier = ""
@@ -27,6 +34,7 @@ class AuthManager: ObservableObject {
     @Published var isSendingCode = false
 
     private let api = APIClient.shared
+    private var currentAppleNonce: String?
 
     init() {
         if ProcessInfo.processInfo.arguments.contains("-uiTestingResetAuth") {
@@ -141,6 +149,105 @@ class AuthManager: ObservableObject {
                 completion(error)
             }
         }
+    }
+
+    func prepareAppleSignIn(_ request: ASAuthorizationAppleIDRequest) {
+        Self.logger.info("Preparing Sign in with Apple request")
+        let nonce = Self.randomNonce()
+        currentAppleNonce = nonce
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = Self.sha256(nonce)
+        loginError = nil
+    }
+
+    func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .failure(let error):
+            Self.logger.error("Sign in with Apple failed: \(error.localizedDescription, privacy: .public)")
+            isLoading = false
+            if (error as? ASAuthorizationError)?.code != .canceled {
+                loginError = error.localizedDescription
+            }
+        case .success(let authorization):
+            Self.logger.info("Received Sign in with Apple authorization")
+            guard
+                let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                let tokenData = credential.identityToken,
+                let identityToken = String(data: tokenData, encoding: .utf8),
+                let nonce = currentAppleNonce
+            else {
+                Self.logger.error("Apple authorization did not contain a usable identity token or nonce")
+                loginError = "无法读取 Apple 登录凭证"
+                isLoading = false
+                return
+            }
+
+            let fullName = credential.fullName.map {
+                PersonNameComponentsFormatter().string(from: $0)
+            }.flatMap { $0.isEmpty ? nil : $0 }
+            isLoading = true
+
+            Task {
+                do {
+                    let loginResponse: LoginResponse = try await api.post(
+                        APIEndpoints.appleLogin,
+                        body: AppleLoginRequest(
+                            identityToken: identityToken,
+                            nonce: nonce,
+                            fullName: fullName
+                        ),
+                        requiresAuth: false
+                    )
+                    api.setToken(loginResponse.accessToken)
+                    let user: UserResponse = try await api.get(APIEndpoints.currentUser)
+                    await MainActor.run {
+                        self.user = user
+                        self.userProfile = UserProfile(
+                            id: user.id,
+                            username: user.username,
+                            name: user.displayName,
+                            email: user.email,
+                            phone: nil,
+                            avatarUrl: user.avatarUrl
+                        )
+                        self.currentAppleNonce = nil
+                        self.isLoading = false
+                        HapticManager.notificationOccurred(.success)
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.loginError = error.localizedDescription
+                        self.currentAppleNonce = nil
+                        self.isLoading = false
+                        HapticManager.notificationOccurred(.error)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func sha256(_ input: String) -> String {
+        SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func randomNonce(length: Int = 32) -> String {
+        precondition(length > 0)
+        let characters = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remaining = length
+
+        while remaining > 0 {
+            var bytes = [UInt8](repeating: 0, count: 16)
+            guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+                fatalError("Unable to generate a secure Apple sign-in nonce")
+            }
+            for byte in bytes where byte < characters.count {
+                result.append(characters[Int(byte)])
+                remaining -= 1
+                if remaining == 0 { break }
+            }
+        }
+        return result
     }
 
     // MARK: - Register
@@ -349,6 +456,77 @@ class AuthManager: ObservableObject {
         }
     }
 
+    func refreshAuthMethods() {
+        guard user != nil else { return }
+        Task {
+            do {
+                let response: AuthMethodsResponse = try await api.get(APIEndpoints.authMethods)
+                await MainActor.run {
+                    self.authMethods = response.methods
+                    self.hasPassword = response.hasPassword
+                }
+            } catch {
+                // Keep the existing UI state if this supplementary request fails.
+            }
+        }
+    }
+
+    func updateUsername(_ username: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let updated: UserResponse = try await api.put(
+                    APIEndpoints.updateUsername,
+                    body: UsernameUpdateRequest(username: username)
+                )
+                await MainActor.run {
+                    self.user = updated
+                    self.userProfile = UserProfile(
+                        id: updated.id,
+                        username: updated.username,
+                        name: updated.displayName,
+                        email: updated.email,
+                        phone: self.userProfile?.phone,
+                        avatarUrl: updated.avatarUrl
+                    )
+                    completion(nil)
+                }
+            } catch {
+                await MainActor.run { completion(error) }
+            }
+        }
+    }
+
+    func sendPasswordSetupCode(completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let _: MessageResponse = try await api.post(APIEndpoints.sendPasswordSetup)
+                await MainActor.run { completion(nil) }
+            } catch {
+                await MainActor.run { completion(error) }
+            }
+        }
+    }
+
+    func setupPassword(code: String, newPassword: String, completion: @escaping (Error?) -> Void) {
+        Task {
+            do {
+                let _: MessageResponse = try await api.put(
+                    APIEndpoints.setupPassword,
+                    body: PasswordSetupRequest(code: code, newPassword: newPassword)
+                )
+                await MainActor.run {
+                    self.hasPassword = true
+                    if !self.authMethods.contains("password") {
+                        self.authMethods.append("password")
+                    }
+                    completion(nil)
+                }
+            } catch {
+                await MainActor.run { completion(error) }
+            }
+        }
+    }
+
     // MARK: - Logout
 
     func signOut() {
@@ -357,6 +535,8 @@ class AuthManager: ObservableObject {
         self.userProfile = nil
         self.avatarImage = nil
         self.isGuestMode = false
+        self.authMethods = []
+        self.hasPassword = true
     }
 
     func enterGuestMode() {

@@ -123,6 +123,8 @@ struct AccountSettingsView: View {
     @State private var alertMessage = ""
     @State private var isLoading = false
     @State private var showingChangePassword = false
+    @State private var showingSetPassword = false
+    @State private var showingChangeUsername = false
     @State private var showingChangeDisplayName = false
     @State private var showingChangeEmail = false
     @State private var avatarItem: PhotosPickerItem?
@@ -163,15 +165,28 @@ struct AccountSettingsView: View {
                     }
                     .foregroundStyle(.primary)
 
-                    LabeledContent("用户名", value: "@\(user.username)")
-
-                    Button { showingChangeEmail = true } label: {
-                        LabeledContent("邮箱", value: user.email)
+                    Button { showingChangeUsername = true } label: {
+                        LabeledContent("用户名", value: "@\(user.username)")
                     }
                     .foregroundStyle(.primary)
 
-                    Button { showingChangePassword = true } label: {
-                        Label("修改密码", systemImage: "lock.rotation")
+                    if auth.hasPassword {
+                        Button { showingChangeEmail = true } label: {
+                            LabeledContent("邮箱", value: user.email)
+                        }
+                        .foregroundStyle(.primary)
+                    } else {
+                        LabeledContent("Apple 登录邮箱", value: user.email)
+                    }
+
+                    Button {
+                        if auth.hasPassword { showingChangePassword = true }
+                        else { showingSetPassword = true }
+                    } label: {
+                        Label(
+                            auth.hasPassword ? "修改密码" : "设置登录密码",
+                            systemImage: auth.hasPassword ? "lock.rotation" : "lock.badge.plus"
+                        )
                     }
 
                 }
@@ -196,6 +211,8 @@ struct AccountSettingsView: View {
         .navigationTitle("账户设置")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingChangePassword) { ChangePasswordView().environmentObject(auth) }
+        .sheet(isPresented: $showingSetPassword) { SetPasswordView().environmentObject(auth) }
+        .sheet(isPresented: $showingChangeUsername) { UsernameSetupView(required: false).environmentObject(auth) }
         .sheet(isPresented: $showingChangeDisplayName) { ChangeDisplayNameView().environmentObject(auth) }
         .sheet(isPresented: $showingChangeEmail) { ChangeEmailView().environmentObject(auth) }
         .alert(alertTitle, isPresented: $showingAlert) { Button("确定", role: .cancel) {} } message: { Text(alertMessage) }
@@ -205,6 +222,7 @@ struct AccountSettingsView: View {
         } message: {
             Text("你的个人资料、拥有的账本、共享账本中的关联记录将被永久删除。此操作无法撤销。")
         }
+        .onAppear { auth.refreshAuthMethods() }
     }
 
     private func handleAvatarSelection(_ item: PhotosPickerItem?) {
@@ -272,6 +290,134 @@ struct AccountSettingsView: View {
                 alertTitle = "错误"
                 alertMessage = error.localizedDescription
                 showingAlert = true
+            }
+        }
+    }
+}
+
+struct UsernameSetupView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    let required: Bool
+    @State private var username = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("用户名", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("3–30 位，以英文字母开头，仅包含英文、数字和下划线。")
+                }
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle(required ? "设置你的用户名" : "修改用户名")
+            .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(required)
+            .onAppear {
+                username = auth.user?.usernameIsGenerated == true ? "" : auth.user?.username ?? ""
+            }
+            .toolbar {
+                if !required {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "保存中…" : "保存") { save() }
+                        .disabled(!auth.isValidUsername(username) || isSaving)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        auth.updateUsername(username) { error in
+            isSaving = false
+            if let error {
+                errorMessage = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
+            } else {
+                HapticManager.notificationOccurred(.success)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct SetPasswordView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var codeSent = false
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("验证邮箱") {
+                    Text(auth.user?.email ?? "")
+                    Button(codeSent ? "重新发送验证码" : "发送验证码") { sendCode() }
+                        .disabled(isLoading)
+                }
+                if codeSent {
+                    Section("设置密码") {
+                        TextField("邮箱验证码", text: $code).keyboardType(.numberPad)
+                        SecureField("新密码", text: $newPassword).textContentType(.newPassword)
+                        SecureField("再次输入新密码", text: $confirmPassword).textContentType(.newPassword)
+                    }
+                }
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("设置登录密码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { save() }
+                        .disabled(!canSave)
+                }
+            }
+        }
+    }
+
+    private var canSave: Bool {
+        codeSent && !code.isEmpty && newPassword.count >= 6 &&
+        newPassword == confirmPassword && !isLoading
+    }
+
+    private func sendCode() {
+        isLoading = true
+        errorMessage = nil
+        auth.sendPasswordSetupCode { error in
+            isLoading = false
+            if let error { errorMessage = error.localizedDescription }
+            else { codeSent = true }
+        }
+    }
+
+    private func save() {
+        isLoading = true
+        errorMessage = nil
+        auth.setupPassword(code: code, newPassword: newPassword) { error in
+            isLoading = false
+            if let error {
+                errorMessage = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
+            } else {
+                HapticManager.notificationOccurred(.success)
+                dismiss()
             }
         }
     }

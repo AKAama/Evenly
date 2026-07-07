@@ -84,7 +84,6 @@ final class LedgerStore: ObservableObject {
                        let ledger = self.ledgers.first(where: { $0.id == selectedId }) {
                         self.currentLedger = ledger
                         UserDefaults.standard.set(ledger.id.uuidString, forKey: self.userDefaultsKey)
-                        self.fetchLedgerDetails(ledgerId: ledger.id)
                     } else {
                         self.currentLedger = nil
                     }
@@ -197,6 +196,40 @@ final class LedgerStore: ObservableObject {
         }
     }
 
+    func fetchOverview(
+        for ledger: Ledger,
+        completion: @escaping (Result<LedgerOverviewResponse, Error>) -> Void
+    ) {
+        Task {
+            do {
+                let response: LedgerOverviewResponse = try await api.get(
+                    APIEndpoints.ledgerOverview(id: ledger.id.uuidString)
+                )
+                var updatedLedger = Ledger(from: response.ledger)
+                updatedLedger.expenses = response.expenses.map {
+                    Expense(from: $0, participants: updatedLedger.participants)
+                }
+                updatedLedger.memberCount = updatedLedger.participants.count
+                updatedLedger.expenseCount = updatedLedger.expenses.count
+
+                await MainActor.run {
+                    if let index = self.ledgers.firstIndex(where: { $0.id == updatedLedger.id }) {
+                        self.ledgers[index] = updatedLedger
+                    }
+                    if self.currentLedger?.id == updatedLedger.id {
+                        self.currentLedger = updatedLedger
+                    }
+                    completion(.success(response))
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - Current Ledger
 
     func ledger(id: UUID) -> Ledger? {
@@ -206,7 +239,6 @@ final class LedgerStore: ObservableObject {
     func setCurrentLedger(_ ledger: Ledger) {
         currentLedger = ledger
         UserDefaults.standard.set(ledger.id.uuidString, forKey: userDefaultsKey)
-        fetchLedgerDetails(ledgerId: ledger.id)
     }
 
     func applyUpdatedLedger(_ ledger: Ledger) {

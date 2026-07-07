@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AuthenticationServices
 
 private enum LoginField: Hashable {
     case identifier
@@ -35,17 +36,21 @@ struct LoginView: View {
         ZStack {
             EvenlyStyle.softBackground
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = nil }
 
             Circle()
                 .fill(EvenlyStyle.blue.opacity(0.10))
                 .frame(width: 320, height: 320)
                 .blur(radius: 2)
                 .offset(x: -220, y: -340)
+                .allowsHitTesting(false)
 
             Circle()
                 .fill(EvenlyStyle.indigo.opacity(0.08))
                 .frame(width: 260, height: 260)
                 .offset(x: 240, y: 390)
+                .allowsHitTesting(false)
 
             VStack(spacing: 20) {
                     Spacer(minLength: 12)
@@ -129,6 +134,23 @@ struct LoginView: View {
                         }
                         .buttonStyle(.spring(.medium))
                         .disabled(auth.isLoading || auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty)
+
+                        HStack {
+                            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
+                            Text("或").font(.caption).foregroundStyle(.secondary)
+                            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
+                        }
+
+                        SignInWithAppleButton(
+                            .signIn,
+                            onRequest: auth.prepareAppleSignIn,
+                            onCompletion: auth.handleAppleSignIn
+                        )
+                        .signInWithAppleButtonStyle(.black)
+                        .frame(height: 50)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .disabled(auth.isLoading)
+                        .accessibilityIdentifier("sign-in-with-apple")
                     }
                     .padding(.horizontal, 24)
 
@@ -177,8 +199,6 @@ struct LoginView: View {
             .frame(maxWidth: 620)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 18)
-            .contentShape(Rectangle())
-            .onTapGesture { focusedField = nil }
         }
         .ignoresSafeArea(.keyboard)
         .navigationBarHidden(true)
@@ -188,19 +208,6 @@ struct LoginView: View {
                 Button("完成") { focusedField = nil }
             }
         }
-    }
-
-    // 点击空白处收起键盘
-    private var dismissKeyboardGesture: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture {
-                hideKeyboard()
-            }
-    }
-
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func submitLogin() {

@@ -37,6 +37,18 @@ struct LoginResponse: Decodable {
     }
 }
 
+struct AppleLoginRequest: Encodable {
+    let identityToken: String
+    let nonce: String
+    let fullName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case identityToken = "identity_token"
+        case nonce
+        case fullName = "full_name"
+    }
+}
+
 struct RegisterRequest: Encodable {
     let email: String
     let password: String
@@ -82,6 +94,7 @@ struct UserResponse: Codable, Identifiable {
     let displayName: String?
     let avatarUrl: String?
     let createdAt: Date?
+    let usernameIsGenerated: Bool
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -90,6 +103,31 @@ struct UserResponse: Codable, Identifiable {
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
         case createdAt = "created_at"
+        case usernameIsGenerated = "username_is_generated"
+    }
+}
+
+struct AuthMethodsResponse: Decodable {
+    let methods: [String]
+    let hasPassword: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case methods
+        case hasPassword = "has_password"
+    }
+}
+
+struct UsernameUpdateRequest: Encodable {
+    let username: String
+}
+
+struct PasswordSetupRequest: Encodable {
+    let code: String
+    let newPassword: String
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case newPassword = "new_password"
     }
 }
 
@@ -215,6 +253,19 @@ struct LedgerWithMembers: Decodable {
         case currency
         case createdAt = "created_at"
         case members
+    }
+}
+
+struct LedgerOverviewResponse: Decodable {
+    let ledger: LedgerWithMembers
+    let expenses: [ExpenseWithDetails]
+    let settlementSuggestions: [SettlementInstruction]
+    let settlementHistory: [SettlementWithUsers]
+
+    enum CodingKeys: String, CodingKey {
+        case ledger, expenses
+        case settlementSuggestions = "settlement_suggestions"
+        case settlementHistory = "settlement_history"
     }
 }
 

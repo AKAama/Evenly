@@ -121,7 +121,9 @@ final class EvenlyTests: XCTestCase {
           "payer": {
             "id": "22222222-2222-2222-2222-222222222222",
             "email": "stella@example.com",
-            "display_name": "Stella"
+            "username": "stella",
+            "display_name": "Stella",
+            "username_is_generated": false
           },
           "splits": [
             {
@@ -164,8 +166,8 @@ final class EvenlyTests: XCTestCase {
             status: .found(userId: "user-1", name: "Stella")
         )
         let results = [
-            UserResponse(id: "user-1", email: "stella@example.com", displayName: "Stella", avatarUrl: nil, createdAt: nil),
-            UserResponse(id: "user-2", email: "tristan@example.com", displayName: "Tristan", avatarUrl: nil, createdAt: nil)
+            UserResponse(id: "user-1", email: "stella@example.com", username: "stella", displayName: "Stella", avatarUrl: nil, createdAt: nil, usernameIsGenerated: false),
+            UserResponse(id: "user-2", email: "tristan@example.com", username: "tristan", displayName: "Tristan", avatarUrl: nil, createdAt: nil, usernameIsGenerated: false)
         ]
 
         let filtered = AddLedgerView.filteredSearchResults(results, excluding: [selected])
@@ -230,7 +232,9 @@ final class EvenlyTests: XCTestCase {
           "payer": {
             "id": "22222222-2222-2222-2222-222222222222",
             "email": "stella@example.com",
-            "display_name": "Stella"
+            "username": "stella",
+            "display_name": "Stella",
+            "username_is_generated": false
           },
           "splits": [
             {

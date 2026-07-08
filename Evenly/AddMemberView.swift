@@ -19,6 +19,10 @@ struct AddMemberView: View {
             ?? Ledger(id: ledgerId, title: "", ownerId: "")
     }
 
+    private var currentParticipants: [Person] {
+        ledger.participants.filter { !$0.isRemoved }
+    }
+
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -130,12 +134,12 @@ struct AddMemberView: View {
 
                 // Current Members Section
                 Section {
-                    ForEach(ledger.participants) { participant in
+                    ForEach(currentParticipants) { participant in
                         memberRowView(participant)
                             .listRowAnimation()
                     }
                 } header: {
-                    Text("当前成员 (\(ledger.participants.count))")
+                    Text("当前成员 (\(currentParticipants.count))")
                 }
             }
             .listStyle(.insetGrouped)

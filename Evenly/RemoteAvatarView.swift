@@ -5,11 +5,13 @@ struct RemoteAvatarView: View {
     var localImage: UIImage? = nil
     var fallbackText: String = "?"
     var size: CGFloat = 44
+    var fallbackBackground: Color = Color.blue.opacity(0.14)
+    var fallbackForeground: Color = .blue
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(Color.blue.opacity(0.14))
+                .fill(fallbackBackground)
 
             if let localImage {
                 Image(uiImage: localImage)
@@ -50,6 +52,6 @@ struct RemoteAvatarView: View {
     private var fallback: some View {
         Text(String(fallbackText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased())
             .font(.system(size: size * 0.38, weight: .semibold))
-            .foregroundStyle(.blue)
+            .foregroundStyle(fallbackForeground)
     }
 }

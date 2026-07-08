@@ -12,6 +12,7 @@ struct Person: Identifiable, Codable, Hashable {
     let name: String
     /// Backend user ID
     var userId: String?
+    var avatarUrl: String?
     var isTemporary: Bool
     /// Membership status: "active" (joined) or "pending" (invited but not yet accepted)
     var status: String
@@ -20,11 +21,14 @@ struct Person: Identifiable, Codable, Hashable {
     var isActive: Bool { status == "active" }
     /// True if the person has been invited but not yet accepted
     var isPending: Bool { status == "pending" }
+    /// Removed members remain available for rendering historical expenses.
+    var isRemoved: Bool { status == "removed" }
 
-    init(id: UUID = UUID(), name: String, userId: String? = nil, isTemporary: Bool = false, status: String = "active") {
+    init(id: UUID = UUID(), name: String, userId: String? = nil, avatarUrl: String? = nil, isTemporary: Bool = false, status: String = "active") {
         self.id = id
         self.name = name
         self.userId = userId
+        self.avatarUrl = avatarUrl
         self.isTemporary = isTemporary
         self.status = status
     }
@@ -34,13 +38,14 @@ struct Person: Identifiable, Codable, Hashable {
         self.id = UUID(uuidString: member.id) ?? UUID()
         self.name = member.nickname ?? member.temporaryName ?? member.user?.displayName ?? member.user?.email ?? "Unknown"
         self.userId = member.userId
+        self.avatarUrl = member.user?.avatarUrl
         self.isTemporary = member.isTemporary
         self.status = member.status
     }
 
     // Custom Decodable so cached data without `status` defaults to "active"
     enum CodingKeys: String, CodingKey {
-        case id, name, userId, isTemporary, status
+        case id, name, userId, avatarUrl, isTemporary, status
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +53,7 @@ struct Person: Identifiable, Codable, Hashable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
         isTemporary = try container.decodeIfPresent(Bool.self, forKey: .isTemporary) ?? false
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? "active"
     }
@@ -150,14 +156,15 @@ struct Ledger: Identifiable, Codable {
 
     // Create from LedgerWithMembers
     init(from response: LedgerWithMembers) {
+        let activeMembers = response.members.filter { $0.status == "active" }
         self.id = UUID(uuidString: response.id) ?? UUID()
         self.title = response.name
         self.ownerId = response.ownerId
-        self.memberIds = response.members.compactMap { $0.userId }
+        self.memberIds = activeMembers.compactMap { $0.userId }
         self.participants = response.members.map { Person(from: $0) }
         self.expenses = []
         self.members = response.members
-        self.memberCount = response.members.count
+        self.memberCount = activeMembers.count
         self.expenseCount = 0
     }
 

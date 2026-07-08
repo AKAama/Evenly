@@ -61,11 +61,11 @@ struct SettlementHistory: Identifiable {
         self.amount = response.amount
         self.note = response.note
         self.settledAt = response.settledAt
-        self.fromUserName = response.fromUser.displayName ?? response.fromUser.email ?? "Unknown"
-        self.toUserName = response.toUser.displayName ?? response.toUser.email ?? "Unknown"
+        self.fromUserName = response.fromUser.displayName ?? response.fromUser.email
+        self.toUserName = response.toUser.displayName ?? response.toUser.email
     }
 
-    private init(group: [SettlementHistory]) {
+    nonisolated private init(group: [SettlementHistory]) {
         let latest = group.max { ($0.settledAt ?? .distantPast) < ($1.settledAt ?? .distantPast) }!
         self.id = "\(latest.fromUserId)->\(latest.toUserId)"
         self.ledgerId = latest.ledgerId
@@ -78,7 +78,7 @@ struct SettlementHistory: Identifiable {
         self.toUserName = latest.toUserName
     }
 
-    static func merging(_ records: [SettlementHistory]) -> [SettlementHistory] {
+    nonisolated static func merging(_ records: [SettlementHistory]) -> [SettlementHistory] {
         Dictionary(grouping: records) { "\($0.fromUserId)->\($0.toUserId)" }
             .values
             .map(SettlementHistory.init(group:))

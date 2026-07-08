@@ -4,7 +4,7 @@ struct LedgerMembersView: View {
     let ledger: Ledger
 
     var body: some View {
-        List(ledger.participants) { participant in
+        List(ledger.participants.filter { !$0.isRemoved }) { participant in
             HStack(spacing: 12) {
                 RemoteAvatarView(
                     avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,

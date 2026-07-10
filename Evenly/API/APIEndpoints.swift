@@ -65,6 +65,9 @@ enum APIEndpoints {
     static func voiceExpenseDraft(ledgerId: String) -> String {
         "/expenses/ledgers/\(ledgerId)/voice-draft"
     }
+    static func voiceExpenseSession(ledgerId: String) -> String {
+        "/expenses/ledgers/\(ledgerId)/voice-session"
+    }
     static func expense(ledgerId: String, expenseId: String) -> String {
         "/expenses/\(expenseId)"
     }

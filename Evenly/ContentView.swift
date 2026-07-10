@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var respondingExpenseIds: Set<UUID> = []
     @State private var actionError: String?
     @State private var showingLeaveLedgerAlert = false
+    @State private var didLongPressLedgerMenu = false
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
@@ -301,11 +302,11 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        HapticManager.impact(.light)
-                        sheetType = .ledgerDrawer
+                        openLedgerDrawerFromMenuButton()
                     } label: {
                         Image(systemName: "line.3.horizontal")
                     }
+                    .onLongPressGesture(perform: openAddLedgerFromLedgerMenu)
                     .buttonStyle(.spring(.light))
                 }
 
@@ -348,6 +349,43 @@ struct ContentView: View {
         }
         .environmentObject(auth)
         .environmentObject(ledgerStore)
+    }
+
+    private func openLedgerDrawerFromMenuButton() {
+        if didLongPressLedgerMenu {
+            didLongPressLedgerMenu = false
+            return
+        }
+
+        HapticManager.impact(.light)
+        sheetType = .ledgerDrawer
+    }
+
+    private func openAddLedgerFromLedgerMenu() {
+        didLongPressLedgerMenu = true
+        HapticManager.impact(.medium)
+        sheetType = .addLedger
+    }
+
+    private func openExpenseDetail(_ expense: Expense, in ledger: Ledger) {
+        HapticManager.impact(.light)
+        sheetType = .expenseDetail(expense, ledger)
+    }
+
+    private func copyExpenseTitle(_ expense: Expense) {
+        UIPasteboard.general.string = expense.title
+        HapticManager.notificationOccurred(.success)
+    }
+
+    private func copyExpenseAmount(_ expense: Expense) {
+        UIPasteboard.general.string = formatAmount(expense.amount)
+        HapticManager.notificationOccurred(.success)
+    }
+
+    private func prepareToDeleteExpense(_ expense: Expense, in ledger: Ledger) {
+        HapticManager.impact(.light)
+        expenseToDelete = expense
+        expenseDeleteLedgerId = ledger.id
     }
 
     private var emptyStateView: some View {
@@ -438,14 +476,67 @@ struct ContentView: View {
             .listRowAnimation()
             .contentShape(Rectangle())
             .onTapGesture {
-                sheetType = .expenseDetail(expense, ledger)
+                openExpenseDetail(expense, in: ledger)
+            }
+            .contextMenu {
+                Button {
+                    openExpenseDetail(expense, in: ledger)
+                } label: {
+                    Label("查看详情", systemImage: "info.circle")
+                }
+
+                Button {
+                    copyExpenseTitle(expense)
+                } label: {
+                    Label("复制标题", systemImage: "doc.on.doc")
+                }
+
+                Button {
+                    copyExpenseAmount(expense)
+                } label: {
+                    Label("复制金额", systemImage: "yensign.circle")
+                }
+
+                if canRespond(to: expense) {
+                    Divider()
+
+                    Button {
+                        respond(to: expense, with: .confirmed, in: ledger)
+                    } label: {
+                        Label("确认账单", systemImage: "checkmark.circle")
+                    }
+
+                    Button(role: .destructive) {
+                        respond(to: expense, with: .rejected, in: ledger)
+                    } label: {
+                        Label("拒绝账单", systemImage: "xmark.circle")
+                    }
+                }
+
+                if expense.createdBy == auth.user?.id {
+                    Divider()
+
+                    Button(role: .destructive) {
+                        prepareToDeleteExpense(expense, in: ledger)
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                }
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if canRespond(to: expense) {
+                    Button {
+                        respond(to: expense, with: .confirmed, in: ledger)
+                    } label: {
+                        Label("确认", systemImage: "checkmark.circle.fill")
+                    }
+                    .tint(.green)
+                }
             }
             .swipeActions(edge: .trailing) {
                 if expense.createdBy == auth.user?.id {
                     Button(role: .destructive) {
-                        HapticManager.impact(.light)
-                        expenseToDelete = expense
-                        expenseDeleteLedgerId = ledger.id
+                        prepareToDeleteExpense(expense, in: ledger)
                     } label: {
                         Label("删除", systemImage: "trash")
                     }

@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import AVFoundation
+@preconcurrency import AVFoundation
 import Combine
 
 struct AddExpenseView: View {
@@ -18,13 +18,12 @@ struct AddExpenseView: View {
     @State private var selectedPayerId: UUID?
     @State private var selectedParticipantIds: Set<UUID> = []
     @State private var isSaving = false
-    @State private var isCreatingVoiceDraft = false
     @State private var transcript: String?
     @State private var errorMessage: String?
     @State private var selectedPresetId: String?
     @State private var selectedPresetGroupId: String = "餐饮"
     @State private var isPeoplePickerPresented = false
-    @StateObject private var voiceRecorder = VoiceExpenseRecorder()
+    @StateObject private var voiceSession = VoiceExpenseStreamingSession()
     @FocusState private var focusedField: InputField?
 
     private enum InputField: Hashable {
@@ -97,6 +96,31 @@ struct AddExpenseView: View {
             .dividing(by: NSDecimalNumber(value: selectedParticipants.count))
         return formatAmountForDisplay(value.decimalValue)
     }
+    private var voiceTranscriptText: String? {
+        let liveText = [voiceSession.finalTranscript, voiceSession.partialTranscript]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !liveText.isEmpty {
+            return liveText
+        }
+        if !voiceSession.statusMessage.isEmpty {
+            return voiceSession.statusMessage
+        }
+        return transcript
+    }
+    private var shouldShowVoiceGuidance: Bool {
+        existingId == nil
+            && ledgerId != nil
+            && voiceTranscriptText == nil
+            && !voiceSession.isRecording
+            && !voiceSession.isProcessing
+    }
+    private let voiceInputExamples = [
+        "我和Tristan住宿花了 300，是我付的",
+        "晚餐 268，Sylvia付，我、Stella和Tristan平摊",
+        "打车 78，Tristan付的，我和Tristan各 39",
+    ]
 
     init(expense: Expense? = nil, participants: [Person], currentUserId: String? = nil, ledgerId: UUID? = nil, onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>) {
         self.participants = participants
@@ -200,7 +224,14 @@ struct AddExpenseView: View {
                 cleanUnavailableSelections()
             }
             .onDisappear {
-                voiceRecorder.cancel()
+                voiceSession.cancel()
+            }
+            .onReceive(voiceSession.$draft.compactMap { $0 }) { draft in
+                applyVoiceDraft(draft)
+            }
+            .onReceive(voiceSession.$errorMessage.compactMap { $0 }) { message in
+                errorMessage = message
+                HapticManager.notificationOccurred(.error)
             }
         }
     }
@@ -269,12 +300,14 @@ struct AddExpenseView: View {
             .padding(.vertical, 12)
             .background(controlFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            if let transcript {
-                Text(transcript)
+            if let voiceText = voiceTranscriptText {
+                Text(voiceText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if shouldShowVoiceGuidance {
+                voiceGuidanceView
             }
 
             HStack {
@@ -316,26 +349,42 @@ struct AddExpenseView: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(voiceRecorder.isRecording ? Color.red.opacity(colorScheme == .dark ? 0.22 : 0.14) : primaryBlue.opacity(colorScheme == .dark ? 0.18 : 0.12))
+                    .fill(voiceSession.isRecording ? Color.red.opacity(colorScheme == .dark ? 0.22 : 0.14) : primaryBlue.opacity(colorScheme == .dark ? 0.18 : 0.12))
                     .frame(width: 36, height: 36)
-                if isCreatingVoiceDraft {
+                if voiceSession.isProcessing {
                     ProgressView()
                         .scaleEffect(0.7)
                 } else {
-                    Image(systemName: voiceRecorder.isRecording ? "stop.fill" : "mic.fill")
+                    Image(systemName: voiceSession.isRecording ? "stop.fill" : "mic.fill")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(voiceRecorder.isRecording ? .red : primaryBlue)
+                        .foregroundStyle(voiceSession.isRecording ? .red : primaryBlue)
                 }
             }
         }
         .buttonStyle(.plain)
-        .disabled(isCreatingVoiceDraft)
-        .accessibilityLabel(voiceRecorder.isRecording ? "停止并生成草稿" : "语音记账")
+        .disabled(voiceSession.isProcessing)
+        .accessibilityLabel(voiceSession.isRecording ? "停止并生成草稿" : "语音记账")
+    }
+
+    private var voiceGuidanceView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("试试这样说", systemImage: "quote.bubble.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(primaryBlue)
+            ForEach(voiceInputExamples, id: \.self) { example in
+                Text(example)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var presetCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("类别", systemImage: "square.grid.2x2.fill")
+            sectionHeader("类别", systemImage: "square.grid.5x5.fill")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -586,48 +635,22 @@ struct AddExpenseView: View {
     private func toggleVoiceRecording() {
         focusedField = nil
         errorMessage = nil
-        if voiceRecorder.isRecording {
-            guard let fileURL = voiceRecorder.stop() else { return }
-            createVoiceDraft(from: fileURL)
-        } else {
-            Task {
-                do {
-                    try await voiceRecorder.start()
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-            }
+        if voiceSession.isRecording {
+            voiceSession.stop()
+            return
         }
-    }
 
-    private func createVoiceDraft(from fileURL: URL) {
         guard let ledgerId else { return }
-        isCreatingVoiceDraft = true
+        transcript = nil
         Task {
             do {
-                let data = try Data(contentsOf: fileURL)
-                let draft: VoiceExpenseDraft = try await APIClient.shared.requestWithFormData(
-                    endpoint: APIEndpoints.voiceExpenseDraft(ledgerId: ledgerId.uuidString),
-                    formFields: [:],
-                    files: [FileUpload(
-                        fieldName: "audio",
-                        filename: "voice.m4a",
-                        mimeType: "audio/mp4",
-                        data: data
-                    )]
-                )
-                await MainActor.run {
-                    applyVoiceDraft(draft)
-                    isCreatingVoiceDraft = false
-                }
+                try await voiceSession.start(ledgerId: ledgerId)
             } catch {
                 await MainActor.run {
-                    isCreatingVoiceDraft = false
                     errorMessage = error.localizedDescription
                     HapticManager.notificationOccurred(.error)
                 }
             }
-            try? FileManager.default.removeItem(at: fileURL)
         }
     }
 
@@ -644,7 +667,6 @@ struct AddExpenseView: View {
         if let selectedPayerId {
             selectedParticipantIds.insert(selectedPayerId)
         }
-        voiceRecorder.speak(draft.confirmationText)
         HapticManager.notificationOccurred(.success)
     }
 
@@ -1100,13 +1122,25 @@ private struct ExpensePeoplePickerView: View {
 }
 
 @MainActor
-private final class VoiceExpenseRecorder: NSObject, ObservableObject {
+private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
+    @Published private(set) var isProcessing = false
+    @Published private(set) var partialTranscript = ""
+    @Published private(set) var finalTranscript = ""
+    @Published private(set) var statusMessage = ""
+    @Published var draft: VoiceExpenseDraft?
+    @Published var errorMessage: String?
 
-    private var recorder: AVAudioRecorder?
-    private let synthesizer = AVSpeechSynthesizer()
+    private let audioEngine = AVAudioEngine()
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var receiveTask: Task<Void, Never>?
+    private var audioSendTask: Task<Void, Never>?
+    private var audioStream: AsyncStream<Data>?
+    private var audioStreamContinuation: AsyncStream<Data>.Continuation?
+    private var audioConverter: AVAudioConverter?
+    private var targetAudioFormat: AVAudioFormat?
 
-    func start() async throws {
+    func start(ledgerId: UUID) async throws {
         guard await Self.requestRecordPermission() else {
             throw NSError(
                 domain: "VoiceExpense",
@@ -1114,22 +1148,41 @@ private final class VoiceExpenseRecorder: NSObject, ObservableObject {
                 userInfo: [NSLocalizedDescriptionKey: "请在系统设置中允许麦克风权限"]
             )
         }
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .spokenAudio)
-        try session.setActive(true)
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("evenly-voice-\(UUID().uuidString).m4a")
-        recorder = try AVAudioRecorder(
-            url: url,
-            settings: [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 16_000,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
-            ]
+
+        resetState()
+        statusMessage = "正在连接语音识别..."
+        try configureAudioEngine()
+        let task = try APIClient.shared.webSocketTask(
+            endpoint: APIEndpoints.voiceExpenseSession(ledgerId: ledgerId.uuidString)
         )
-        recorder?.record()
-        isRecording = true
+        webSocketTask = task
+        task.resume()
+        receiveTask = Task { [weak self] in
+            await self?.receiveMessages()
+        }
+        // 音频发送走独立后台串行 Task，避免在主线程 await send 被 UI 渲染阻塞，
+        // 造成 stop 信号排在最后一个音频 chunk 之后多秒才能发出。
+        let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
+        audioStream = stream
+        audioStreamContinuation = continuation
+        audioSendTask = Task { [weak self] in
+            for await data in stream {
+                guard let self, let ws = self.webSocketTask else { break }
+                if Task.isCancelled { break }
+                try? await ws.send(.data(data))
+            }
+        }
+        try await sendStartMessage()
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+            isRecording = true
+        } catch {
+            task.cancel(with: .goingAway, reason: nil)
+            webSocketTask = nil
+            stopAudioEngine()
+            throw error
+        }
     }
 
     nonisolated private static func requestRecordPermission() async -> Bool {
@@ -1140,29 +1193,240 @@ private final class VoiceExpenseRecorder: NSObject, ObservableObject {
         }
     }
 
-    func stop() -> URL? {
-        guard let recorder else { return nil }
-        recorder.stop()
-        self.recorder = nil
+    func stop() {
+        guard isRecording else { return }
+        stopAudioEngine()
         isRecording = false
-        try? AVAudioSession.sharedInstance().setActive(false)
-        return recorder.url
+        isProcessing = true
+        statusMessage = "正在识别并生成草稿..."
+        Task { [weak self] in
+            try? await self?.sendJSON(["type": "stop"])
+        }
     }
 
     func cancel() {
-        guard let recorder else { return }
-        recorder.stop()
-        try? FileManager.default.removeItem(at: recorder.url)
-        self.recorder = nil
+        stopAudioEngine()
+        receiveTask?.cancel()
+        receiveTask = nil
+        audioSendTask?.cancel()
+        audioSendTask = nil
+        audioStreamContinuation?.finish()
+        audioStreamContinuation = nil
+        audioStream = nil
+        if let task = webSocketTask {
+            webSocketTask = nil
+            Task {
+                if let data = try? JSONSerialization.data(withJSONObject: ["type": "cancel"]),
+                   let text = String(data: data, encoding: .utf8) {
+                    try? await task.send(.string(text))
+                }
+                task.cancel(with: .normalClosure, reason: nil)
+            }
+        }
         isRecording = false
+        isProcessing = false
+        statusMessage = ""
+    }
+
+    private func resetState() {
+        cancel()
+        partialTranscript = ""
+        finalTranscript = ""
+        statusMessage = ""
+        draft = nil
+        errorMessage = nil
+    }
+
+    private func configureAudioEngine() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .defaultToSpeaker])
+        try session.setActive(true)
+
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw NSError(
+                domain: "VoiceExpense",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "当前麦克风输入格式不可用"]
+            )
+        }
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw NSError(
+                domain: "VoiceExpense",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "无法初始化语音编码器"]
+            )
+        }
+        audioConverter = AVAudioConverter(from: inputFormat, to: targetFormat)
+        guard let converter = audioConverter else {
+            throw NSError(
+                domain: "VoiceExpense",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "无法初始化语音编码器"]
+            )
+        }
+        targetAudioFormat = targetFormat
+
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let data = Self.pcm16Data(from: buffer, converter: converter, targetFormat: targetFormat), !data.isEmpty else {
+                return
+            }
+            // 直接丢给后台串行发送流，不要在 MainActor 上 await send —— 否则被 UI 渲染阻塞
+            // 会导致 stop 信号在最后一个 chunk 后排几秒才能发出去，拖慢整条链路。
+            self?.audioStreamContinuation?.yield(data)
+        }
+    }
+
+    private func stopAudioEngine() {
+        audioEngine.inputNode.removeTap(onBus: 0)
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioConverter = nil
+        targetAudioFormat = nil
         try? AVAudioSession.sharedInstance().setActive(false)
     }
 
-    func speak(_ text: String) {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
-        synthesizer.speak(utterance)
+    private func sendStartMessage() async throws {
+        try await sendJSON([
+            "type": "start",
+            "audio": [
+                "format": "pcm_s16le",
+                "sample_rate": 16_000,
+                "channels": 1,
+            ],
+        ])
     }
+
+    private func sendJSON(_ payload: [String: Any]) async throws {
+        guard let webSocketTask else { throw APIError.invalidResponse }
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let text = String(decoding: data, as: UTF8.self)
+        try await webSocketTask.send(.string(text))
+    }
+
+    private func receiveMessages() async {
+        guard let webSocketTask else { return }
+        do {
+            while !Task.isCancelled {
+                let message = try await webSocketTask.receive()
+                switch message {
+                case .string(let text):
+                    handleEvent(Data(text.utf8))
+                case .data(let data):
+                    handleEvent(data)
+                @unknown default:
+                    break
+                }
+            }
+        } catch {
+            if isRecording || isProcessing {
+                errorMessage = error.localizedDescription
+                isRecording = false
+                isProcessing = false
+                stopAudioEngine()
+            }
+        }
+    }
+
+    private func handleEvent(_ data: Data) {
+        guard let event = try? JSONDecoder().decode(VoiceExpenseSessionEvent.self, from: data) else {
+            return
+        }
+        switch event.type {
+        case "ready":
+            statusMessage = "正在录音..."
+            return
+        case "partial_transcript":
+            statusMessage = ""
+            partialTranscript = event.text ?? ""
+        case "final_transcript":
+            statusMessage = ""
+            partialTranscript = ""
+            finalTranscript = [finalTranscript, event.text ?? ""]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        case "draft":
+            isRecording = false
+            isProcessing = false
+            statusMessage = ""
+            stopAudioEngine()
+            draft = event.data
+            audioSendTask?.cancel()
+            audioSendTask = nil
+            audioStreamContinuation?.finish()
+            audioStreamContinuation = nil
+            audioStream = nil
+            webSocketTask?.cancel(with: .normalClosure, reason: nil)
+            webSocketTask = nil
+        case "error":
+            isRecording = false
+            isProcessing = false
+            statusMessage = ""
+            stopAudioEngine()
+            errorMessage = event.message ?? "语音识别失败"
+            audioSendTask?.cancel()
+            audioSendTask = nil
+            audioStreamContinuation?.finish()
+            audioStreamContinuation = nil
+            audioStream = nil
+            webSocketTask?.cancel(with: .normalClosure, reason: nil)
+            webSocketTask = nil
+        default:
+            return
+        }
+    }
+
+    nonisolated private static func pcm16Data(
+        from buffer: AVAudioPCMBuffer,
+        converter: AVAudioConverter,
+        targetFormat: AVAudioFormat
+    ) -> Data? {
+        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
+        let frameCapacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 32
+        guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCapacity) else {
+            return nil
+        }
+
+        var didProvideInput = false
+        var conversionError: NSError?
+        let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outStatus in
+            if didProvideInput {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        guard status != .error, conversionError == nil, convertedBuffer.frameLength > 0, let samples = convertedBuffer.floatChannelData?[0] else {
+            return nil
+        }
+
+        var data = Data(capacity: Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size)
+        for index in 0..<Int(convertedBuffer.frameLength) {
+            let clamped = max(-1, min(1, samples[index]))
+            var sample = Int16(clamped * Float(Int16.max))
+            withUnsafeBytes(of: &sample) { bytes in
+                data.append(contentsOf: bytes)
+            }
+        }
+        return data
+    }
+}
+
+private struct VoiceExpenseSessionEvent: Decodable {
+    let type: String
+    let text: String?
+    let message: String?
+    let data: VoiceExpenseDraft?
 }
 
 #Preview {

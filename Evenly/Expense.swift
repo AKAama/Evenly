@@ -15,6 +15,8 @@ struct Expense: Identifiable, Codable {
     var participants: [Person]
     var status: ExpenseStatus
     var note: String?
+    var category: String?
+    var icon: ExpenseIcon?
     var expenseDate: Date?
     var createdAt: Date?
     var updatedAt: Date?
@@ -30,6 +32,8 @@ struct Expense: Identifiable, Codable {
         participants: [Person],
         status: ExpenseStatus = .pending,
         note: String? = nil,
+        category: String? = nil,
+        icon: ExpenseIcon? = nil,
         expenseDate: Date? = nil,
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
@@ -43,6 +47,8 @@ struct Expense: Identifiable, Codable {
         self.participants = participants
         self.status = status
         self.note = note
+        self.category = category
+        self.icon = icon
         self.expenseDate = expenseDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -70,6 +76,10 @@ struct Expense: Identifiable, Codable {
         }
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
         self.note = response.note
+        self.category = response.category
+        self.icon = response.iconType.flatMap(ExpenseIconType.init(rawValue:)).flatMap { type in
+            response.iconValue.map { ExpenseIcon(type: type, value: $0) }
+        }
         self.expenseDate = response.expenseDate
         self.createdAt = response.createdAt
         self.updatedAt = response.updatedAt
@@ -92,6 +102,10 @@ struct Expense: Identifiable, Codable {
         self.participants = participants
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
         self.note = response.note
+        self.category = response.category
+        self.icon = response.iconType.flatMap(ExpenseIconType.init(rawValue:)).flatMap { type in
+            response.iconValue.map { ExpenseIcon(type: type, value: $0) }
+        }
         self.expenseDate = response.expenseDate
         self.createdAt = response.createdAt
         self.updatedAt = response.updatedAt
@@ -145,7 +159,10 @@ extension Expense {
             payerId: payerId,
             splits: splits,
             note: note,
-            expenseDate: Self.requestDateFormatter.string(from: expenseDate ?? Date())
+            expenseDate: Self.requestDateFormatter.string(from: expenseDate ?? Date()),
+            category: category,
+            iconType: icon?.type.rawValue,
+            iconValue: icon?.value
         )
     }
 

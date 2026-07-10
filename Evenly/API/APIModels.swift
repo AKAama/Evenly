@@ -357,6 +357,9 @@ struct ExpenseCreate: Encodable {
     let splits: [ExpenseSplitCreate]
     let note: String?
     let expenseDate: String
+    let category: String?
+    let iconType: String?
+    let iconValue: String?
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -365,6 +368,9 @@ struct ExpenseCreate: Encodable {
         case splits
         case note
         case expenseDate = "expense_date"
+        case category
+        case iconType = "icon_type"
+        case iconValue = "icon_value"
     }
 }
 
@@ -392,6 +398,9 @@ struct ExpenseResponse: Decodable, Identifiable {
     let status: String
     let createdAt: Date?
     let updatedAt: Date?
+    let category: String?
+    let iconType: String?
+    let iconValue: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -405,6 +414,9 @@ struct ExpenseResponse: Decodable, Identifiable {
         case status
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case category
+        case iconType = "icon_type"
+        case iconValue = "icon_value"
     }
 
     init(from decoder: Decoder) throws {
@@ -420,6 +432,9 @@ struct ExpenseResponse: Decodable, Identifiable {
         status = try container.decode(String.self, forKey: .status)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        category = try container.decodeIfPresent(String.self, forKey: .category)
+        iconType = try container.decodeIfPresent(String.self, forKey: .iconType)
+        iconValue = try container.decodeIfPresent(String.self, forKey: .iconValue)
     }
 }
 
@@ -435,6 +450,9 @@ struct ExpenseWithDetails: Decodable, Identifiable {
     let status: String
     let createdAt: Date?
     let updatedAt: Date?
+    let category: String?
+    let iconType: String?
+    let iconValue: String?
     let payer: UserResponse
     let splits: [ExpenseSplitResponse]
     let confirmations: [ExpenseConfirmationResponse]
@@ -451,6 +469,9 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         case status
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case category
+        case iconType = "icon_type"
+        case iconValue = "icon_value"
         case payer
         case splits
         case confirmations
@@ -469,6 +490,9 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         status = try container.decode(String.self, forKey: .status)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        category = try container.decodeIfPresent(String.self, forKey: .category)
+        iconType = try container.decodeIfPresent(String.self, forKey: .iconType)
+        iconValue = try container.decodeIfPresent(String.self, forKey: .iconValue)
         payer = try container.decode(UserResponse.self, forKey: .payer)
         splits = try container.decode([ExpenseSplitResponse].self, forKey: .splits)
         confirmations = try container.decode([ExpenseConfirmationResponse].self, forKey: .confirmations)
@@ -530,9 +554,10 @@ struct VoiceExpenseDraft: Decodable {
     let payerUserId: String
     let participantMemberIds: [String]
     let confirmationText: String
+    let category: String?
 
     enum CodingKeys: String, CodingKey {
-        case transcript, title, amount
+        case transcript, title, amount, category
         case payerUserId = "payer_user_id"
         case participantMemberIds = "participant_member_ids"
         case confirmationText = "confirmation_text"
@@ -546,6 +571,7 @@ struct VoiceExpenseDraft: Decodable {
         payerUserId = try container.decode(String.self, forKey: .payerUserId)
         participantMemberIds = try container.decode([String].self, forKey: .participantMemberIds)
         confirmationText = try container.decode(String.self, forKey: .confirmationText)
+        category = try container.decodeIfPresent(String.self, forKey: .category)
     }
 }
 

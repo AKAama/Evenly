@@ -22,7 +22,10 @@ struct AddExpenseView: View {
     @State private var errorMessage: String?
     @State private var selectedPresetId: String?
     @State private var selectedPresetGroupId: String = "餐饮"
+    @State private var selectedCategory: String?
+    @State private var selectedIcon: ExpenseIcon?
     @State private var isPeoplePickerPresented = false
+    @State private var isIconPickerPresented = false
     @StateObject private var voiceSession = VoiceExpenseStreamingSession()
     @FocusState private var focusedField: InputField?
 
@@ -76,11 +79,11 @@ struct AddExpenseView: View {
     private var selectedParticipants: [Person] {
         participants.filter { $0.isActive && selectedParticipantIds.contains($0.id) }
     }
-    private var selectedPreset: ExpensePreset? {
-        Self.expensePresets.flatMap(\.items).first { $0.id == selectedPresetId }
+    private var selectedPreset: ExpenseCategoryPreset? {
+        ExpenseCategoryCatalog.categories.flatMap(\.items).first { $0.id == selectedPresetId }
     }
-    private var selectedPresetGroup: ExpensePresetGroup {
-        Self.expensePresets.first { $0.id == selectedPresetGroupId } ?? Self.expensePresets[0]
+    private var selectedPresetGroup: ExpenseCategoryGroup {
+        ExpenseCategoryCatalog.categories.first { $0.id == selectedPresetGroupId } ?? ExpenseCategoryCatalog.categories[0]
     }
     private var participantSummary: String {
         guard !selectedParticipants.isEmpty else { return "还没选择参与人" }
@@ -129,6 +132,12 @@ struct AddExpenseView: View {
         self.onSave = onSave
         self.existingId = expense?.id
         _title = State(initialValue: expense?.title ?? "")
+        _selectedCategory = State(initialValue: expense?.category)
+        _selectedIcon = State(initialValue: expense?.icon)
+        if let preset = expense.flatMap({ ExpenseCategoryCatalog.preset(named: $0.title) }) {
+            _selectedPresetId = State(initialValue: preset.id)
+            _selectedPresetGroupId = State(initialValue: preset.category)
+        }
         if let amount = expense?.amount {
             _amountText = State(initialValue: formatAmountForInput(amount))
         }
@@ -183,6 +192,18 @@ struct AddExpenseView: View {
                     selectedParticipantIds: $selectedParticipantIds
                 )
                 .presentationDetents([.large])
+            }
+            .sheet(isPresented: $isIconPickerPresented) {
+                ExpenseIconPickerView(selection: Binding(
+                    get: { selectedIcon },
+                    set: { icon in
+                        selectedIcon = icon
+                        if selectedCategory == nil {
+                            selectedCategory = selectedPresetGroup.name
+                        }
+                    }
+                ))
+                    .presentationDetents([.medium, .large])
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -246,8 +267,11 @@ struct AddExpenseView: View {
                 if existingId == nil, ledgerId != nil {
                     voiceIconButton
                 }
-                if let selectedPreset {
-                    Label(selectedPreset.name, systemImage: selectedPreset.icon)
+                if let selectedIcon {
+                    HStack(spacing: 6) {
+                        expenseIconView(selectedIcon, size: 14)
+                        Text(selectedCategory ?? selectedPreset?.name ?? "自定义")
+                    }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(primaryBlue)
                         .padding(.horizontal, 10)
@@ -388,7 +412,7 @@ struct AddExpenseView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Self.expensePresets) { group in
+                    ForEach(ExpenseCategoryCatalog.categories) { group in
                         presetGroupButton(group)
                     }
                 }
@@ -406,6 +430,27 @@ struct AddExpenseView: View {
                 }
                 .padding(.horizontal, 1)
             }
+
+            Button {
+                focusedField = nil
+                isIconPickerPresented = true
+            } label: {
+                HStack {
+                    if let selectedIcon {
+                        expenseIconView(selectedIcon, size: 18)
+                    } else {
+                        Image(systemName: "face.smiling")
+                    }
+                    Text("选择其他图标或 Emoji")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .padding(.top, 4)
+            }
+            .buttonStyle(.plain)
         }
         .expenseInputCard()
     }
@@ -477,18 +522,20 @@ struct AddExpenseView: View {
             .foregroundStyle(.primary)
     }
 
-    private func presetGroupButton(_ group: ExpensePresetGroup) -> some View {
+    private func presetGroupButton(_ group: ExpenseCategoryGroup) -> some View {
         let isSelected = selectedPresetGroup.id == group.id
         return Button {
             focusedField = nil
             selectedPresetGroupId = group.id
+            selectedCategory = group.name
             if !group.items.contains(where: { $0.id == selectedPresetId }) {
                 selectedPresetId = nil
+                selectedIcon = group.icon
             }
             HapticManager.selection.selectionChanged()
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: group.icon)
+                Image(systemName: group.icon.value)
                     .font(.caption.weight(.bold))
                 Text(group.name)
                     .font(.subheadline.weight(.semibold))
@@ -508,16 +555,18 @@ struct AddExpenseView: View {
         .buttonStyle(.plain)
     }
 
-    private func presetButton(_ preset: ExpensePreset) -> some View {
+    private func presetButton(_ preset: ExpenseCategoryPreset) -> some View {
         let isSelected = selectedPresetId == preset.id
         return Button {
             focusedField = nil
             selectedPresetId = preset.id
             title = preset.name
+            selectedCategory = preset.category
+            selectedIcon = preset.icon
             HapticManager.selection.selectionChanged()
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: preset.icon)
+                Image(systemName: preset.icon.value)
                     .font(.caption.weight(.bold))
                 Text(preset.name)
                     .font(.subheadline.weight(.semibold))
@@ -592,37 +641,6 @@ struct AddExpenseView: View {
         String(participant.name.prefix(1))
     }
 
-    private static let expensePresets: [ExpensePresetGroup] = [
-        ExpensePresetGroup(
-            name: "餐饮",
-            icon: "fork.knife",
-            items: [
-                ExpensePreset(name: "早餐", icon: "sunrise.fill"),
-                ExpensePreset(name: "午餐", icon: "sun.max.fill"),
-                ExpensePreset(name: "晚餐", icon: "moon.stars.fill")
-            ]
-        ),
-        ExpensePresetGroup(
-            name: "交通",
-            icon: "tram.fill",
-            items: [
-                ExpensePreset(name: "打车", icon: "car.fill"),
-                ExpensePreset(name: "高铁", icon: "train.side.front.car"),
-                ExpensePreset(name: "地铁", icon: "tram.fill")
-            ]
-        ),
-        ExpensePresetGroup(
-            name: "住宿",
-            icon: "bed.double.fill",
-            items: [
-                ExpensePreset(name: "住宿", icon: "bed.double.fill"),
-                ExpensePreset(name: "酒店", icon: "building.2.fill"),
-                ExpensePreset(name: "民宿", icon: "house.fill"),
-                ExpensePreset(name: "门票", icon: "ticket.fill")
-            ]
-        )
-    ]
-
     private func cleanUnavailableSelections() {
         let pendingIds = Set(participants.filter { !$0.isActive }.map(\.id))
         selectedParticipantIds.subtract(pendingIds)
@@ -658,6 +676,12 @@ struct AddExpenseView: View {
         title = draft.title
         amountText = formatAmountForInput(draft.amount)
         transcript = draft.transcript
+        if let category = draft.category,
+           let icon = ExpenseCategoryCatalog.defaultIcon(for: category) {
+            selectedCategory = category
+            selectedIcon = icon
+            selectedPresetGroupId = category
+        }
         if let payer = registeredParticipants.first(where: { $0.userId == draft.payerUserId }) {
             selectedPayerId = payer.id
         }
@@ -719,7 +743,9 @@ struct AddExpenseView: View {
             title: title,
             amount: amount,
             payer: payer,
-            participants: Array(selectedParticipants)
+            participants: Array(selectedParticipants),
+            category: selectedCategory,
+            icon: selectedIcon
         )
 
         Task {
@@ -775,21 +801,14 @@ struct AddExpenseView: View {
         formatter.maximumFractionDigits = 2
         return formatter.string(from: number) ?? ""
     }
-}
-
-private struct ExpensePresetGroup: Identifiable {
-    let name: String
-    let icon: String
-    let items: [ExpensePreset]
-
-    var id: String { name }
-}
-
-private struct ExpensePreset: Identifiable, Hashable {
-    let name: String
-    let icon: String
-
-    var id: String { name }
+    @ViewBuilder
+    private func expenseIconView(_ icon: ExpenseIcon, size: CGFloat) -> some View {
+        if icon.type == .emoji {
+            Text(icon.value).font(.system(size: size))
+        } else {
+            Image(systemName: icon.value).font(.system(size: size, weight: .semibold))
+        }
+    }
 }
 
 private struct ExpenseInputCardModifier: ViewModifier {
@@ -810,6 +829,58 @@ private struct ExpenseInputCardModifier: ViewModifier {
 private extension View {
     func expenseInputCard() -> some View {
         modifier(ExpenseInputCardModifier())
+    }
+}
+
+private struct ExpenseIconPickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selection: ExpenseIcon?
+    private let columns = [GridItem(.adaptive(minimum: 52), spacing: 12)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    iconSection("图标", icons: ExpenseCategoryCatalog.sfSymbolIcons)
+                    iconSection("Emoji", icons: ExpenseCategoryCatalog.emojiIcons)
+                }
+                .padding(20)
+            }
+            .navigationTitle("选择账单图标")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func iconSection(_ title: String, icons: [ExpenseIcon]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.headline)
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(icons) { icon in
+                    Button {
+                        selection = icon
+                        HapticManager.selection.selectionChanged()
+                    } label: {
+                        Group {
+                            if icon.type == .emoji {
+                                Text(icon.value).font(.system(size: 24))
+                            } else {
+                                Image(systemName: icon.value).font(.system(size: 20, weight: .semibold))
+                            }
+                        }
+                        .frame(width: 48, height: 48)
+                        .foregroundStyle(selection == icon ? .white : EvenlyStyle.brandBlueAccent)
+                        .background(selection == icon ? EvenlyStyle.brandBlueAccent : Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(icon.value)
+                }
+            }
+        }
     }
 }
 

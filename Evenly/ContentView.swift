@@ -717,9 +717,7 @@ struct ContentView: View {
                     Circle()
                         .fill(EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.20 : 0.12))
                         .frame(width: 40, height: 40)
-                    Image(systemName: "yensign.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(EvenlyStyle.brandBlue)
+                    expenseIconView(expense)
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -778,6 +776,18 @@ struct ContentView: View {
             }
         }
         .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func expenseIconView(_ expense: Expense) -> some View {
+        if let icon = expense.icon, icon.type == .emoji {
+            Text(icon.value)
+                .font(.system(size: 22))
+        } else {
+            Image(systemName: expense.icon?.value ?? "yensign.circle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(EvenlyStyle.brandBlue)
+        }
     }
 
     // MARK: - Helper Methods

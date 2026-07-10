@@ -425,4 +425,55 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual(receivedPayer?.id, payer.id)
         XCTAssertEqual(receivedPayer?.userId, payer.userId)
     }
+
+    func testExpenseResponseDecodesSynchronizedCategoryIcon() throws {
+        let json = """
+        {
+          "id": "44444444-4444-4444-4444-444444444444",
+          "ledger_id": "11111111-1111-1111-1111-111111111111",
+          "payer_id": "22222222-2222-2222-2222-222222222222",
+          "created_by": "22222222-2222-2222-2222-222222222222",
+          "title": "午餐",
+          "total_amount": "28.00",
+          "status": "confirmed",
+          "category": "餐饮",
+          "icon_type": "emoji",
+          "icon_value": "🍜"
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(ExpenseResponse.self, from: json)
+
+        XCTAssertEqual(response.category, "餐饮")
+        XCTAssertEqual(response.iconType, "emoji")
+        XCTAssertEqual(response.iconValue, "🍜")
+    }
+
+    func testExpenseCategoryCatalogMapsPresetToCategoryAndIcon() throws {
+        let preset = try XCTUnwrap(ExpenseCategoryCatalog.preset(named: "午餐"))
+
+        XCTAssertEqual(preset.category, "餐饮")
+        XCTAssertEqual(preset.icon.type, .sfSymbol)
+        XCTAssertEqual(preset.icon.value, "sun.max.fill")
+        XCTAssertTrue(ExpenseCategoryCatalog.emojiIcons.contains { $0.value == "🍜" })
+    }
+
+    func testExpenseCreateEncodesCategoryAndEmojiIcon() throws {
+        let payer = Person(name: "Owner", userId: "22222222-2222-2222-2222-222222222222")
+        let expense = Expense(
+            title: "午餐",
+            amount: 28,
+            payer: payer,
+            participants: [payer],
+            category: "餐饮",
+            icon: ExpenseIcon(type: .emoji, value: "🍜")
+        )
+
+        let data = try JSONEncoder().encode(expense.toCreateRequest(payerId: payer.userId!, ledgerId: UUID()))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(json["category"] as? String, "餐饮")
+        XCTAssertEqual(json["icon_type"] as? String, "emoji")
+        XCTAssertEqual(json["icon_value"] as? String, "🍜")
+    }
 }

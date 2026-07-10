@@ -78,6 +78,7 @@ final class APIClient: ObservableObject {
     private let tokenStore = KeychainTokenStore(service: "cn.evenly.api")
 
     private let session: URLSession
+    private let webSocketSession: URLSession
     private var cancellables = Set<AnyCancellable>()
     private static let jsonDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -112,6 +113,11 @@ final class APIClient: ObservableObject {
         config.timeoutIntervalForResource = 60
         self.session = URLSession(configuration: config)
 
+        let webSocketConfig = URLSessionConfiguration.default
+        webSocketConfig.timeoutIntervalForRequest = 0
+        webSocketConfig.timeoutIntervalForResource = 0
+        self.webSocketSession = URLSession(configuration: webSocketConfig)
+
         self.token = tokenStore.readToken(account: tokenKey)
         if token == nil, let legacyToken = UserDefaults.standard.string(forKey: tokenKey) {
             token = legacyToken
@@ -140,6 +146,40 @@ final class APIClient: ObservableObject {
 
     var currentToken: String? {
         token
+    }
+
+    static func webSocketURL(baseURL: String = APIClient.baseURL, endpoint: String) -> URL? {
+        guard var components = URLComponents(string: baseURL) else { return nil }
+        switch components.scheme {
+        case "https":
+            components.scheme = "wss"
+        case "http":
+            components.scheme = "ws"
+        default:
+            return nil
+        }
+
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpointPath = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = "/" + [basePath, endpointPath]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+        return components.url
+    }
+
+    func webSocketTask(endpoint: String, requiresAuth: Bool = true) throws -> URLSessionWebSocketTask {
+        guard let url = Self.webSocketURL(endpoint: endpoint) else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        if requiresAuth {
+            guard let token else {
+                throw APIError.unauthorized
+            }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return webSocketSession.webSocketTask(with: request)
     }
 
     // MARK: - Request Methods

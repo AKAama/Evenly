@@ -70,9 +70,12 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     self.ledgers = responses.map { Ledger(from: $0) }.sorted { $0.title < $1.title }
 
-                    for response in responses where response.needsSummaryHydration {
+                    // List responses contain counts, but not member records. Always
+                    // hydrate the full ledger so member views and expense forms have
+                    // real participants after login or accepting an invitation.
+                    for response in responses {
                         if let ledgerId = UUID(uuidString: response.id) {
-                            self.hydrateSummary(ledgerId: ledgerId)
+                            self.hydrateLedger(ledgerId: ledgerId)
                         }
                     }
 
@@ -146,23 +149,26 @@ final class LedgerStore: ObservableObject {
         }
     }
 
-    private func hydrateSummary(ledgerId: UUID) {
+    private func hydrateLedger(ledgerId: UUID) {
         Task {
             do {
                 let detail: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledgerId.uuidString))
                 let expenses: [ExpenseWithDetails] = try await api.get(APIEndpoints.expenses(ledgerId: ledgerId.uuidString))
+                var hydrated = Ledger(from: detail)
+                hydrated.expenses = expenses.map {
+                    Expense(from: $0, participants: hydrated.participants)
+                }
+                hydrated.expenseCount = hydrated.expenses.count
 
                 await MainActor.run {
                     guard let index = self.ledgers.firstIndex(where: { $0.id == ledgerId }) else { return }
-                    self.ledgers[index].memberCount = detail.members.count
-                    self.ledgers[index].expenseCount = expenses.count
+                    self.ledgers[index] = hydrated
                     if self.currentLedger?.id == ledgerId {
-                        self.currentLedger?.memberCount = detail.members.count
-                        self.currentLedger?.expenseCount = expenses.count
+                        self.currentLedger = hydrated
                     }
                 }
             } catch {
-                print("Failed to hydrate ledger summary \(ledgerId): \(error)")
+                print("Failed to hydrate ledger \(ledgerId): \(error)")
             }
         }
     }
@@ -181,7 +187,7 @@ final class LedgerStore: ObservableObject {
                         } else {
                             merged.expenses = self.ledgers[index].expenses
                         }
-                        merged.memberCount = merged.participants.count
+                        merged.memberCount = merged.participants.filter(\.isActive).count
                         merged.expenseCount = self.ledgers[index].expenseCount
                         self.ledgers[index] = merged
                         self.currentLedger = merged
@@ -209,7 +215,7 @@ final class LedgerStore: ObservableObject {
                 updatedLedger.expenses = response.expenses.map {
                     Expense(from: $0, participants: updatedLedger.participants)
                 }
-                updatedLedger.memberCount = updatedLedger.participants.count
+                updatedLedger.memberCount = updatedLedger.participants.filter(\.isActive).count
                 updatedLedger.expenseCount = updatedLedger.expenses.count
 
                 await MainActor.run {
@@ -592,65 +598,6 @@ final class LedgerStore: ObservableObject {
                     }
                     completion(.success(()))
                 }
-            } catch {
-                await MainActor.run {
-                    completion(.failure(error))
-                }
-            }
-        }
-    }
-
-    // MARK: - Settlement Operations
-
-    func fetchSettlements(for ledger: Ledger, completion: @escaping (Result<[Settlement], Error>) -> Void) {
-        Task {
-            do {
-                let responses: [SettlementInstruction] = try await api.get(APIEndpoints.settlements(ledgerId: ledger.id.uuidString))
-
-                await MainActor.run {
-                    let settlements = responses.map { Settlement(from: $0) }
-                    completion(.success(settlements))
-                }
-
-            } catch {
-                await MainActor.run {
-                    completion(.failure(error))
-                }
-            }
-        }
-    }
-
-    func fetchSettlementHistory(for ledger: Ledger, completion: @escaping (Result<[SettlementHistory], Error>) -> Void) {
-        Task {
-            do {
-                let responses: [SettlementWithUsers] = try await api.get(APIEndpoints.settlementHistory(ledgerId: ledger.id.uuidString))
-
-                await MainActor.run {
-                    completion(.success(responses.map { SettlementHistory(from: $0) }))
-                }
-            } catch {
-                await MainActor.run {
-                    completion(.failure(error))
-                }
-            }
-        }
-    }
-
-    func createSettlement(from fromUserId: String, to toUserId: String, amount: Decimal, for ledger: Ledger, completion: @escaping (Result<Void, Error>) -> Void) {
-        Task {
-            do {
-                let request = SettlementCreate(
-                    fromUserId: fromUserId,
-                    toUserId: toUserId,
-                    amount: amount,
-                    note: nil
-                )
-                let _: SettlementResponse = try await api.post(APIEndpoints.settlements(ledgerId: ledger.id.uuidString), body: request)
-
-                await MainActor.run {
-                    completion(.success(()))
-                }
-
             } catch {
                 await MainActor.run {
                     completion(.failure(error))

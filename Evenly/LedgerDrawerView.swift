@@ -29,10 +29,6 @@ struct LedgerDrawerView: View {
         NavigationStack {
             List {
                 Section {
-                    userHeaderView
-                }
-
-                Section {
                     if ledgerStore.ledgers.isEmpty {
                         HStack {
                             Spacer()
@@ -55,8 +51,6 @@ struct LedgerDrawerView: View {
                                 .listRowAnimation()
                         }
                     }
-                } header: {
-                    Text("我的账本")
                 }
             }
             .listStyle(.insetGrouped)
@@ -86,31 +80,6 @@ struct LedgerDrawerView: View {
                 }
             }
         }
-    }
-
-    private var userHeaderView: some View {
-        HStack(spacing: 12) {
-            RemoteAvatarView(
-                avatarUrl: auth.userProfile?.avatarUrl,
-                localImage: auth.avatarImage,
-                fallbackText: auth.userProfile?.displayName ?? "用户",
-                size: 50
-            )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(auth.userProfile?.displayName ?? "用户")
-                    .font(.headline)
-                    .dynamicTypeSize(.accessibility2)
-                if let username = auth.userProfile?.username {
-                    Text("@\(username)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-        }
-        .padding(.vertical, 8)
     }
 
     private func ledgerRowView(_ ledger: Ledger) -> some View {

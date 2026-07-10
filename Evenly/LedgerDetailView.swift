@@ -324,7 +324,7 @@ struct LedgerDetailView: View {
     @ViewBuilder
     private var addExpenseSheet: some View {
         if let ledger = ledger {
-            AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id) { newExpense in
+            AddExpenseView(participants: ledger.participants, currentUserId: auth.user?.id, ledgerId: ledger.id) { newExpense in
                 await submitAddExpense(newExpense, to: ledger)
             }
         }

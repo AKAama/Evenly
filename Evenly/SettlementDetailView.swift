@@ -8,53 +8,185 @@
 import SwiftUI
 
 struct SettlementDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let ledger: Ledger
     let suggestions: [Settlement]
 
+    private var totalAmount: Decimal {
+        suggestions.reduce(.zero) { $0 + $1.amount }
+    }
+
     var body: some View {
-        List {
-            Section {
+        ScrollView {
+            VStack(spacing: 20) {
                 if suggestions.isEmpty {
-                    HStack {
-                        Image(systemName: "checkmark.circle")
-                            .foregroundStyle(.green)
-                        Text("账目已结清")
-                            .foregroundStyle(.secondary)
-                    }
+                    settledState
                 } else {
-                    ForEach(suggestions) { settlement in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(settlement.fromUserName)
-                                    .font(.subheadline)
-                                Image(systemName: "arrow.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text(settlement.toUserName)
-                                    .font(.subheadline)
-                            }
-                            .frame(width: 80)
+                    summary
 
-                            Spacer()
-
-                            Text(formatAmount(settlement.amount))
-                                .font(.headline)
-                                .foregroundStyle(.orange)
-
+                    LazyVStack(spacing: 12) {
+                        ForEach(suggestions) { settlement in
+                            settlementCard(settlement)
                         }
                     }
-                }
-            } header: {
-                Text("待结算")
-            } footer: {
-                if suggestions.isEmpty {
-                    Text("所有账目已结清 🎉")
-                } else {
-                    Text("系统根据未拒绝账单扣除已记录转账后，给出的待结算转账方案")
+
+                    Text("根据所有成员已确认的账单自动计算")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 32)
         }
-        .navigationTitle("全部结算方案")
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("转账流向")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var summary: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                    .frame(width: 48, height: 48)
+
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(EvenlyStyle.brandBlue)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("需要完成 \(suggestions.count) 笔转账")
+                    .font(.headline)
+
+                Text(ledger.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Text(formatAmount(totalAmount))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(EvenlyStyle.brandBlue)
+                .monospacedDigit()
+        }
+        .padding(18)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.1 : 0.05), lineWidth: 0.75)
+        }
+    }
+
+    private func settlementCard(_ settlement: Settlement) -> some View {
+        VStack(spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("转账金额")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text(formatAmount(settlement.amount))
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+            }
+
+            HStack(spacing: 12) {
+                personView(
+                    name: settlement.fromUserName,
+                    userId: settlement.fromUserId,
+                    role: "付款"
+                )
+
+                flowIndicator
+
+                personView(
+                    name: settlement.toUserName,
+                    userId: settlement.toUserId,
+                    role: "收款"
+                )
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.09 : 0.04), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.18 : 0.05), radius: 14, y: 6)
+    }
+
+    private func personView(name: String, userId: String, role: String) -> some View {
+        let person = ledger.person(by: userId)
+
+        return VStack(spacing: 7) {
+            RemoteAvatarView(
+                avatarUrl: person?.avatarUrl,
+                fallbackText: name,
+                size: 48,
+                fallbackBackground: EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.24 : 0.12),
+                fallbackForeground: EvenlyStyle.brandBlue
+            )
+
+            Text(name)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Text(role)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var flowIndicator: some View {
+        HStack(spacing: 3) {
+            Capsule()
+                .fill(EvenlyStyle.brandBlue.opacity(0.22))
+                .frame(width: 16, height: 2)
+
+            Image(systemName: "arrow.right")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(EvenlyStyle.brandBlue)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var settledState: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(colorScheme == .dark ? 0.18 : 0.1))
+                    .frame(width: 76, height: 76)
+
+                Image(systemName: "checkmark")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.green)
+            }
+
+            VStack(spacing: 6) {
+                Text("账目已结清")
+                    .font(.title2.weight(.semibold))
+
+                Text("目前没有需要完成的转账")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 64)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.1 : 0.05), lineWidth: 0.75)
+        }
     }
 }

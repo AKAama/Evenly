@@ -8,6 +8,96 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual("Evenly", "Evenly")
     }
 
+    func testLedgerDrawerOmitsAccountHeader() throws {
+        let source = try sourceFile(named: "LedgerDrawerView.swift")
+
+        XCTAssertFalse(source.contains("userHeaderView"))
+        XCTAssertFalse(source.contains("RemoteAvatarView("))
+    }
+
+    func testLedgerMenuButtonSupportsLongPressAddLedgerShortcut() throws {
+        let source = try sourceFile(named: "ContentView.swift")
+
+        XCTAssertTrue(source.contains(".onLongPressGesture(perform: openAddLedgerFromLedgerMenu)"))
+    }
+
+    func testExpenseRowsExposeContextMenuActions() throws {
+        let source = try sourceFile(named: "ContentView.swift")
+
+        XCTAssertTrue(source.contains(".contextMenu {"))
+        XCTAssertTrue(source.contains("Label(\"复制标题\", systemImage: \"doc.on.doc\")"))
+        XCTAssertTrue(source.contains("Label(\"查看详情\", systemImage: \"info.circle\")"))
+    }
+
+    func testExpenseRowsExposeLeadingSwipeConfirmationAction() throws {
+        let source = try sourceFile(named: "ContentView.swift")
+
+        XCTAssertTrue(source.contains(".swipeActions(edge: .leading, allowsFullSwipe: true)"))
+        XCTAssertTrue(source.contains("Label(\"确认\", systemImage: \"checkmark.circle.fill\")"))
+    }
+
+    func testVoiceExpenseUsesStreamingEndpoint() {
+        let ledgerId = "11111111-1111-1111-1111-111111111111"
+
+        XCTAssertEqual(
+            APIEndpoints.voiceExpenseSession(ledgerId: ledgerId),
+            "/expenses/ledgers/\(ledgerId)/voice-session"
+        )
+    }
+
+    func testAPIClientBuildsWebSocketURLFromHTTPBaseURL() throws {
+        let url = try XCTUnwrap(APIClient.webSocketURL(
+            baseURL: "https://evenly.ismyh.cn/api",
+            endpoint: "/expenses/ledgers/ledger-1/voice-session"
+        ))
+
+        XCTAssertEqual(url.absoluteString, "wss://evenly.ismyh.cn/api/expenses/ledgers/ledger-1/voice-session")
+    }
+
+    func testAPIClientUsesDedicatedLongLivedWebSocketSession() throws {
+        let source = try sourceFile(named: "APIClient.swift")
+
+        XCTAssertTrue(source.contains("private let webSocketSession: URLSession"))
+        XCTAssertTrue(source.contains("webSocketConfig.timeoutIntervalForRequest = 0"))
+        XCTAssertTrue(source.contains("return webSocketSession.webSocketTask(with: request)"))
+    }
+
+    func testAddExpenseViewUsesStreamingVoiceSessionInsteadOfUploadDraft() throws {
+        let source = try sourceFile(named: "AddExpenseView.swift")
+
+        XCTAssertTrue(source.contains("VoiceExpenseStreamingSession"))
+        XCTAssertTrue(source.contains("voiceSession.start"))
+        XCTAssertFalse(source.contains("requestWithFormData("))
+        XCTAssertFalse(source.contains("voiceExpenseDraft("))
+    }
+
+    func testVoiceStreamingReusesAudioConverterOutsideTapCallback() throws {
+        let source = try sourceFile(named: "AddExpenseView.swift")
+
+        XCTAssertTrue(source.contains("private var audioConverter: AVAudioConverter?"))
+        XCTAssertTrue(source.contains("audioConverter = AVAudioConverter(from: inputFormat, to: targetFormat)"))
+        XCTAssertFalse(source.contains("let converter = AVAudioConverter(from: inputFormat, to: targetFormat)"))
+    }
+
+    func testVoiceStreamingShowsProcessingStatusAfterStop() throws {
+        let source = try sourceFile(named: "AddExpenseView.swift")
+
+        XCTAssertTrue(source.contains("@Published private(set) var statusMessage"))
+        XCTAssertTrue(source.contains("正在识别并生成草稿..."))
+        XCTAssertTrue(source.contains("voiceSession.statusMessage"))
+    }
+
+    func testAddExpenseViewShowsVoiceInputExamples() throws {
+        let source = try sourceFile(named: "AddExpenseView.swift")
+
+        XCTAssertTrue(source.contains("private var voiceGuidanceView: some View"))
+        XCTAssertTrue(source.contains("试试这样说"))
+        XCTAssertTrue(source.contains("我和Tristan住宿花了 300，是我付的"))
+        XCTAssertTrue(source.contains("晚餐 268，Sylvia付，我、Stella和Tristan平摊"))
+        XCTAssertTrue(source.contains("打车 78，Tristan付的，我和Tristan各 39"))
+        XCTAssertTrue(source.contains("voiceGuidanceView"))
+    }
+
     func testLedgerSummaryDecodesIntoLedger() throws {
         let json = """
         {
@@ -25,6 +115,32 @@ final class EvenlyTests: XCTestCase {
 
         XCTAssertEqual(ledger.memberCount, 3)
         XCTAssertEqual(ledger.expenseCount, 2)
+    }
+
+    private func sourceFile(named fileName: String) throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let sourceRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Evenly")
+
+        let directURL = sourceRoot
+            .appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: directURL.path) {
+            return try String(contentsOf: directURL)
+        }
+
+        let enumerator = FileManager.default.enumerator(
+            at: sourceRoot,
+            includingPropertiesForKeys: nil
+        )
+        while let url = enumerator?.nextObject() as? URL {
+            if url.lastPathComponent == fileName {
+                return try String(contentsOf: url)
+            }
+        }
+
+        throw CocoaError(.fileNoSuchFile)
     }
 
     func testLegacyLedgerCacheDecodesWithoutSummaryFields() throws {
@@ -121,7 +237,9 @@ final class EvenlyTests: XCTestCase {
           "payer": {
             "id": "22222222-2222-2222-2222-222222222222",
             "email": "stella@example.com",
-            "display_name": "Stella"
+            "username": "stella",
+            "display_name": "Stella",
+            "username_is_generated": false
           },
           "splits": [
             {
@@ -164,8 +282,8 @@ final class EvenlyTests: XCTestCase {
             status: .found(userId: "user-1", name: "Stella")
         )
         let results = [
-            UserResponse(id: "user-1", email: "stella@example.com", displayName: "Stella", avatarUrl: nil, createdAt: nil),
-            UserResponse(id: "user-2", email: "tristan@example.com", displayName: "Tristan", avatarUrl: nil, createdAt: nil)
+            UserResponse(id: "user-1", email: "stella@example.com", username: "stella", displayName: "Stella", avatarUrl: nil, createdAt: nil, usernameIsGenerated: false),
+            UserResponse(id: "user-2", email: "tristan@example.com", username: "tristan", displayName: "Tristan", avatarUrl: nil, createdAt: nil, usernameIsGenerated: false)
         ]
 
         let filtered = AddLedgerView.filteredSearchResults(results, excluding: [selected])
@@ -230,7 +348,9 @@ final class EvenlyTests: XCTestCase {
           "payer": {
             "id": "22222222-2222-2222-2222-222222222222",
             "email": "stella@example.com",
-            "display_name": "Stella"
+            "username": "stella",
+            "display_name": "Stella",
+            "username_is_generated": false
           },
           "splits": [
             {

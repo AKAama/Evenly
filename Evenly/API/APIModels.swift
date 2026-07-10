@@ -523,6 +523,32 @@ struct ConfirmExpenseRequest: Encodable {
     let status: String
 }
 
+struct VoiceExpenseDraft: Decodable {
+    let transcript: String
+    let title: String
+    let amount: Decimal
+    let payerUserId: String
+    let participantMemberIds: [String]
+    let confirmationText: String
+
+    enum CodingKeys: String, CodingKey {
+        case transcript, title, amount
+        case payerUserId = "payer_user_id"
+        case participantMemberIds = "participant_member_ids"
+        case confirmationText = "confirmation_text"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        transcript = try container.decode(String.self, forKey: .transcript)
+        title = try container.decode(String.self, forKey: .title)
+        amount = try container.decodeFlexibleDecimal(forKey: .amount)
+        payerUserId = try container.decode(String.self, forKey: .payerUserId)
+        participantMemberIds = try container.decode([String].self, forKey: .participantMemberIds)
+        confirmationText = try container.decode(String.self, forKey: .confirmationText)
+    }
+}
+
 // MARK: - Settlement Models
 
 struct SettlementCreate: Encodable {

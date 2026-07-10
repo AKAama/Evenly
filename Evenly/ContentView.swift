@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject var auth = AuthManager()
     @StateObject var ledgerStore = LedgerStore()
     @StateObject var themeManager = ThemeManager()
@@ -20,16 +21,13 @@ struct ContentView: View {
     @State private var expenseToDelete: Expense?
     @State private var expenseDeleteLedgerId: UUID?
     @State private var settlementSuggestions: [Settlement] = []
-    @State private var settlementHistory: [SettlementHistory] = []
     @State private var isLoadingSettlementData = false
     @State private var settlementError: String?
-    @State private var settlementActionIds: Set<String> = []
-    @State private var settlementToConfirm: Settlement?
-    @State private var pendingSettlementLedgerId: UUID?
     @State private var loadedSettlementLedgerId: UUID?
     @State private var respondingExpenseIds: Set<UUID> = []
     @State private var actionError: String?
     @State private var showingLeaveLedgerAlert = false
+    @State private var didLongPressLedgerMenu = false
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
@@ -107,24 +105,6 @@ struct ContentView: View {
             } message: {
                 Text("退出后将无法继续查看该账本。")
             }
-            .confirmationDialog(
-                settlementConfirmTitle,
-                isPresented: Binding(
-                    get: { settlementToConfirm != nil },
-                    set: { if !$0 { settlementToConfirm = nil; pendingSettlementLedgerId = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button(settlementConfirmConfirmLabel, role: .destructive) {
-                    confirmSettlementFromDialog()
-                }
-                Button("取消", role: .cancel) {
-                    settlementToConfirm = nil
-                    pendingSettlementLedgerId = nil
-                }
-            } message: {
-                Text(settlementConfirmMessage)
-            }
             .alert(
                 "删除账单",
                 isPresented: Binding(
@@ -173,7 +153,7 @@ struct ContentView: View {
                         }
                         .tag(1)
                 }
-                .tint(.blue)
+                .tint(EvenlyStyle.brandBlue)
             } else if auth.isGuestMode {
                 GuestModeView()
             } else {
@@ -228,6 +208,7 @@ struct ContentView: View {
             AddExpenseView(
                 participants: ledger.participants,
                 currentUserId: auth.user?.id,
+                ledgerId: ledger.id,
                 onSave: { newExpense in
                     await submitAddExpense(newExpense, to: ledger)
                 }
@@ -252,41 +233,6 @@ struct ContentView: View {
     private var expenseDeleteMessage: String {
         guard let expense = expenseToDelete else { return "" }
         return "确定删除「\(expense.title)」？此操作无法撤销。"
-    }
-
-    private var settlementConfirmTitle: String { "确认转账" }
-
-    private var settlementConfirmConfirmLabel: String {
-        guard let s = settlementToConfirm else { return "确认" }
-        return s.fromUserId == auth.user?.id ? "确认已转账" : "确认已收款"
-    }
-
-    private var settlementConfirmMessage: String {
-        guard let s = settlementToConfirm else { return "" }
-        let amount = formatAmount(s.amount)
-        if s.fromUserId == auth.user?.id {
-            return "确认已转账 \(amount) 给 \(s.toUserName)？"
-        } else {
-            return "确认已收到 \(s.fromUserName) 转账 \(amount)？"
-        }
-    }
-
-    private func confirmSettlementFromDialog() {
-        guard let settlement = settlementToConfirm else { return }
-        let ledger: Ledger?
-        if let lid = pendingSettlementLedgerId {
-            ledger = ledgerStore.ledgers.first(where: { $0.id == lid }) ?? ledgerStore.currentLedger
-        } else {
-            ledger = ledgerStore.currentLedger
-        }
-        guard let ledger else {
-            settlementToConfirm = nil
-            pendingSettlementLedgerId = nil
-            return
-        }
-        recordSettlement(settlement, in: ledger)
-        settlementToConfirm = nil
-        pendingSettlementLedgerId = nil
     }
 
     private func confirmDeleteExpense() {
@@ -356,11 +302,11 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        HapticManager.impact(.light)
-                        sheetType = .ledgerDrawer
+                        openLedgerDrawerFromMenuButton()
                     } label: {
                         Image(systemName: "line.3.horizontal")
                     }
+                    .onLongPressGesture(perform: openAddLedgerFromLedgerMenu)
                     .buttonStyle(.spring(.light))
                 }
 
@@ -403,6 +349,43 @@ struct ContentView: View {
         }
         .environmentObject(auth)
         .environmentObject(ledgerStore)
+    }
+
+    private func openLedgerDrawerFromMenuButton() {
+        if didLongPressLedgerMenu {
+            didLongPressLedgerMenu = false
+            return
+        }
+
+        HapticManager.impact(.light)
+        sheetType = .ledgerDrawer
+    }
+
+    private func openAddLedgerFromLedgerMenu() {
+        didLongPressLedgerMenu = true
+        HapticManager.impact(.medium)
+        sheetType = .addLedger
+    }
+
+    private func openExpenseDetail(_ expense: Expense, in ledger: Ledger) {
+        HapticManager.impact(.light)
+        sheetType = .expenseDetail(expense, ledger)
+    }
+
+    private func copyExpenseTitle(_ expense: Expense) {
+        UIPasteboard.general.string = expense.title
+        HapticManager.notificationOccurred(.success)
+    }
+
+    private func copyExpenseAmount(_ expense: Expense) {
+        UIPasteboard.general.string = formatAmount(expense.amount)
+        HapticManager.notificationOccurred(.success)
+    }
+
+    private func prepareToDeleteExpense(_ expense: Expense, in ledger: Ledger) {
+        HapticManager.impact(.light)
+        expenseToDelete = expense
+        expenseDeleteLedgerId = ledger.id
     }
 
     private var emptyStateView: some View {
@@ -454,7 +437,6 @@ struct ContentView: View {
 
             expenseListSection(ledger)
             mySettlementSection(ledger)
-            settlementHistorySection
             allSettlementsLinkSection(ledger)
         }
         .listStyle(.insetGrouped)
@@ -485,7 +467,7 @@ struct ContentView: View {
                 }
             }
         } header: {
-            expenseSectionHeader
+            expenseSectionHeader(count: expenses.count)
         }
     }
 
@@ -494,14 +476,67 @@ struct ContentView: View {
             .listRowAnimation()
             .contentShape(Rectangle())
             .onTapGesture {
-                sheetType = .expenseDetail(expense, ledger)
+                openExpenseDetail(expense, in: ledger)
+            }
+            .contextMenu {
+                Button {
+                    openExpenseDetail(expense, in: ledger)
+                } label: {
+                    Label("查看详情", systemImage: "info.circle")
+                }
+
+                Button {
+                    copyExpenseTitle(expense)
+                } label: {
+                    Label("复制标题", systemImage: "doc.on.doc")
+                }
+
+                Button {
+                    copyExpenseAmount(expense)
+                } label: {
+                    Label("复制金额", systemImage: "yensign.circle")
+                }
+
+                if canRespond(to: expense) {
+                    Divider()
+
+                    Button {
+                        respond(to: expense, with: .confirmed, in: ledger)
+                    } label: {
+                        Label("确认账单", systemImage: "checkmark.circle")
+                    }
+
+                    Button(role: .destructive) {
+                        respond(to: expense, with: .rejected, in: ledger)
+                    } label: {
+                        Label("拒绝账单", systemImage: "xmark.circle")
+                    }
+                }
+
+                if expense.createdBy == auth.user?.id {
+                    Divider()
+
+                    Button(role: .destructive) {
+                        prepareToDeleteExpense(expense, in: ledger)
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                }
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if canRespond(to: expense) {
+                    Button {
+                        respond(to: expense, with: .confirmed, in: ledger)
+                    } label: {
+                        Label("确认", systemImage: "checkmark.circle.fill")
+                    }
+                    .tint(.green)
+                }
             }
             .swipeActions(edge: .trailing) {
                 if expense.createdBy == auth.user?.id {
                     Button(role: .destructive) {
-                        HapticManager.impact(.light)
-                        expenseToDelete = expense
-                        expenseDeleteLedgerId = ledger.id
+                        prepareToDeleteExpense(expense, in: ledger)
                     } label: {
                         Label("删除", systemImage: "trash")
                     }
@@ -538,9 +573,9 @@ struct ContentView: View {
         .padding(.vertical, 30)
     }
 
-    private var expenseSectionHeader: some View {
+    private func expenseSectionHeader(count: Int) -> some View {
         HStack {
-            Text("账单")
+            Text("账单（\(count)）")
             Spacer()
             Button {
                 expenseFilter = expenseFilter.next
@@ -554,7 +589,7 @@ struct ContentView: View {
                 .fontWeight(.medium)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.blue)
+            .foregroundStyle(EvenlyStyle.brandBlue)
         }
         .textCase(nil)
     }
@@ -571,44 +606,14 @@ struct ContentView: View {
                         .foregroundStyle(.orange)
                 } else {
                     ForEach(mine) { settlement in
-                        mySettlementRow(settlement, ledger: ledger)
+                        mySettlementRow(settlement)
                     }
                 }
             } header: {
-                Text("与我相关的待结算")
+                Text("与我相关的转账流向")
             } footer: {
-                Text("只显示需要你付款或收款的项目，完成转账后点击右侧勾选")
+                Text("所有参与成员确认账单后，系统会自动生成转账流向")
             }
-        }
-    }
-
-    private var settlementHistorySection: some View {
-        Section {
-            if settlementHistory.isEmpty {
-                Text("暂无结算记录")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(SettlementHistory.merging(settlementHistory)) { settlement in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(settlement.fromUserName) → \(settlement.toUserName)")
-                                .font(.subheadline)
-                            if let settledAt = settlement.settledAt {
-                                Text(formatDate(settledAt))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        Text(formatAmount(settlement.amount))
-                            .font(.headline)
-                    }
-                }
-            }
-        } header: {
-            Text("已结算记录")
-        } footer: {
-            Text("这里保存已标记完成的转账")
         }
     }
 
@@ -621,7 +626,7 @@ struct ContentView: View {
                 )
             } label: {
                 HStack {
-                    Label("查看全部结算方案", systemImage: "list.bullet.rectangle.portrait")
+                    Label("查看全部转账流向", systemImage: "list.bullet.rectangle.portrait")
                     Spacer()
                     if !settlementSuggestions.isEmpty {
                         Text("\(settlementSuggestions.count) 笔")
@@ -655,16 +660,32 @@ struct ContentView: View {
                     overviewMetric(icon: "person.2.fill", value: "\(ledger.participantCount)", label: "成员")
                 }
                 .buttonStyle(.plain)
-                overviewMetric(icon: "receipt.fill", value: "\(ledger.expenses.count)", label: "账单")
+                Button {
+                    sheetType = .addExpense
+                    HapticManager.impact(.medium)
+                } label: {
+                    overviewAction(icon: "plus.circle.fill", label: "添加账单")
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(red: 0.10, green: 0.38, blue: 0.78))
+        .background(overviewCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: EvenlyStyle.blue.opacity(0.16), radius: 10, y: 5)
+        .shadow(color: EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.20 : 0.16), radius: 10, y: 5)
         .padding(.horizontal, 4)
         .padding(.vertical, 5)
+    }
+
+    private var overviewCardBackground: some ShapeStyle {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [EvenlyStyle.brandBlueDeep.opacity(0.96), Color(red: 0.15, green: 0.29, blue: 0.48)]
+                : [EvenlyStyle.brandBlueHero, EvenlyStyle.brandBlue],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private func overviewMetric(icon: String, value: String, label: String) -> some View {
@@ -678,16 +699,27 @@ struct ContentView: View {
         .frame(minWidth: 42)
     }
 
+    private func overviewAction(icon: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+            Text(label)
+                .fontWeight(.semibold)
+        }
+        .font(.caption)
+        .foregroundStyle(.white.opacity(0.9))
+        .frame(minWidth: 52)
+    }
+
     private func expenseRowView(_ expense: Expense, ledger: Ledger) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(Color.blue.opacity(0.15))
+                        .fill(EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.20 : 0.12))
                         .frame(width: 40, height: 40)
                     Image(systemName: "yensign.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(EvenlyStyle.brandBlue)
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -828,15 +860,14 @@ struct ContentView: View {
             switch result {
             case .success(let overview):
                 settlementSuggestions = overview.settlementSuggestions.map { Settlement(from: $0) }
-                settlementHistory = overview.settlementHistory.map { SettlementHistory(from: $0) }
             case .failure(let error):
                 settlementError = error.localizedDescription
             }
         }
     }
 
-    /// 与当前用户相关的待结算:我需转给别人的 + 别人需转给我的
-    /// 后端返回的 suggestions 已经扣除了已记录的转账金额，这里只需过滤出涉及当前用户的。
+    /// 与当前用户相关的转账流向:我需转给别人的 + 别人需转给我的
+    /// 后端根据所有已确认账单实时生成流向，这里只过滤出涉及当前用户的项目。
     private func mySettlements(in ledger: Ledger) -> [Settlement] {
         guard let me = auth.user?.id else { return [] }
         return settlementSuggestions.compactMap { suggestion in
@@ -854,7 +885,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func mySettlementRow(_ settlement: Settlement, ledger: Ledger) -> some View {
+    private func mySettlementRow(_ settlement: Settlement) -> some View {
         let me = auth.user?.id
         let iOwe = settlement.fromUserId == me
         HStack(spacing: 12) {
@@ -881,43 +912,8 @@ struct ContentView: View {
             Text(formatAmount(settlement.amount))
                 .font(.headline)
                 .foregroundStyle(iOwe ? .orange : .green)
-
-            Button {
-                HapticManager.impact(.light)
-                // Capture the ledger and settlement in the dialog via state
-                pendingSettlementLedgerId = ledger.id
-                settlementToConfirm = settlement
-            } label: {
-                if settlementActionIds.contains(settlement.id) {
-                    ProgressView()
-                } else {
-                    Image(systemName: "checkmark.circle")
-                }
-            }
-            .buttonStyle(.borderless)
-            .disabled(settlementActionIds.contains(settlement.id))
         }
         .padding(.vertical, 2)
-    }
-
-    private func recordSettlement(_ settlement: Settlement, in ledger: Ledger) {
-        settlementActionIds.insert(settlement.id)
-        ledgerStore.createSettlement(
-            from: settlement.fromUserId,
-            to: settlement.toUserId,
-            amount: settlement.amount,
-            for: ledger
-        ) { result in
-            settlementActionIds.remove(settlement.id)
-            switch result {
-            case .success:
-                HapticManager.notificationOccurred(.success)
-                loadSettlementData(for: ledger)
-            case .failure(let error):
-                HapticManager.notificationOccurred(.error)
-                actionError = error.localizedDescription
-            }
-        }
     }
 
     private func leaveLedger(_ ledger: Ledger) {

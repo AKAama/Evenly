@@ -9,21 +9,49 @@ import SwiftUI
 
 // MARK: - Evenly Visual Language
 enum EvenlyStyle {
-    static let blue = Color(red: 0.12, green: 0.48, blue: 0.96)
+    static let brandBlue = Color(red: 0.12, green: 0.48, blue: 0.96)
+    static let brandBlueHero = Color(red: 0.10, green: 0.38, blue: 0.78)
+    static let brandBlueAccent = Color(red: 0.35, green: 0.57, blue: 0.93)
+    static let brandBlueSoft = Color(red: 0.83, green: 0.89, blue: 0.98)
+    static let brandBlueDeep = Color(red: 0.11, green: 0.22, blue: 0.38)
+    static let blue = brandBlue
     static let indigo = Color(red: 0.31, green: 0.25, blue: 0.88)
     static let cyan = Color(red: 0.10, green: 0.72, blue: 0.82)
 
     static let brandGradient = LinearGradient(
-        colors: [blue, indigo],
+        colors: [brandBlue, indigo],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     static let softBackground = LinearGradient(
-        colors: [blue.opacity(0.12), indigo.opacity(0.06), Color.clear],
+        colors: [brandBlue.opacity(0.12), indigo.opacity(0.06), Color.clear],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
+
+    static func brandBlueSoft(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? brandBlueDeep : brandBlueSoft
+    }
+
+    static func brandBlueGlow(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.08, green: 0.16, blue: 0.28).opacity(0.8)
+            : brandBlueSoft.opacity(0.48)
+    }
+
+    static func selectedBlueFill(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.12, green: 0.25, blue: 0.42)
+            : brandBlueSoft.opacity(0.62)
+    }
+
+    static func avatarBlueFill(_ colorScheme: ColorScheme, selected: Bool) -> Color {
+        if colorScheme == .dark {
+            return selected ? Color(red: 0.18, green: 0.34, blue: 0.55) : Color(red: 0.16, green: 0.28, blue: 0.45)
+        }
+        return brandBlueSoft.opacity(selected ? 0.95 : 0.55)
+    }
 }
 
 struct ElevatedCardModifier: ViewModifier {

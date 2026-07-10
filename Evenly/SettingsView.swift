@@ -11,6 +11,21 @@ struct SettingsView: View {
     @EnvironmentObject var auth: AuthManager
     @EnvironmentObject var themeManager: ThemeManager
 
+    private var versionLabel: String {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "Unknown"
+        return "\(version) (\(buildConfiguration))"
+    }
+
+    private var buildConfiguration: String {
+        #if DEBUG
+        "Debug"
+        #else
+        "Release"
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -81,7 +96,7 @@ struct SettingsView: View {
                     HStack {
                         Label("版本", systemImage: "info.circle")
                         Spacer()
-                        Text("1.0.0")
+                        Text(versionLabel)
                             .foregroundStyle(.secondary)
                     }
 
@@ -129,7 +144,14 @@ struct AccountSettingsView: View {
     @State private var showingChangeEmail = false
     @State private var avatarItem: PhotosPickerItem?
     @State private var selectedAvatarImage: UIImage?
+    @State private var pendingAvatarImage: UIImage?
     @State private var isUploadingAvatar = false
+    @State private var isPreparingAvatar = false
+    @State private var showingAvatarOptions = false
+    @State private var pendingAvatarAction: AvatarAction?
+    @State private var showingAvatarPreview = false
+    @State private var showingAvatarPicker = false
+    @State private var showingAvatarEditor = false
     @State private var showingDeleteAccountConfirmation = false
 
     var body: some View {
@@ -138,7 +160,10 @@ struct AccountSettingsView: View {
                 Section {
                     HStack {
                         Spacer()
-                        PhotosPicker(selection: $avatarItem, matching: .images) {
+                        Button {
+                            HapticManager.impact(.light)
+                            showingAvatarOptions = true
+                        } label: {
                             ZStack {
                                 RemoteAvatarView(
                                     avatarUrl: auth.userProfile?.avatarUrl,
@@ -146,13 +171,15 @@ struct AccountSettingsView: View {
                                     fallbackText: auth.userProfile?.displayName ?? user.email,
                                     size: 88
                                 )
-                                if isUploadingAvatar {
+                                if isUploadingAvatar || isPreparingAvatar {
                                     Circle().fill(.black.opacity(0.35)).frame(width: 88, height: 88)
-                                    ProgressView().tint(.white)
+                                    ProgressView()
+                                        .tint(.white)
                                 }
                             }
                         }
-                        .disabled(isUploadingAvatar)
+                        .buttonStyle(.plain)
+                        .disabled(isUploadingAvatar || isPreparingAvatar)
                         Spacer()
                     }
                     .padding(.vertical, 10)
@@ -215,6 +242,31 @@ struct AccountSettingsView: View {
         .sheet(isPresented: $showingChangeUsername) { UsernameSetupView(required: false).environmentObject(auth) }
         .sheet(isPresented: $showingChangeDisplayName) { ChangeDisplayNameView().environmentObject(auth) }
         .sheet(isPresented: $showingChangeEmail) { ChangeEmailView().environmentObject(auth) }
+        .sheet(isPresented: $showingAvatarOptions, onDismiss: performPendingAvatarAction) {
+            AvatarOptionsSheet { action in
+                pendingAvatarAction = action
+                showingAvatarOptions = false
+            }
+            .presentationDetents([.height(176)])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+        }
+        .sheet(isPresented: $showingAvatarEditor) {
+            if let pendingAvatarImage {
+                AvatarEditorView(image: pendingAvatarImage) { editedImage in
+                    selectedAvatarImage = editedImage
+                    uploadAvatar(image: editedImage)
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showingAvatarPreview) {
+            AvatarPreviewView(
+                avatarUrl: auth.userProfile?.avatarUrl,
+                localImage: selectedAvatarImage ?? auth.avatarImage,
+                fallbackText: auth.userProfile?.displayName ?? auth.user?.email ?? "?"
+            )
+        }
+        .photosPicker(isPresented: $showingAvatarPicker, selection: $avatarItem, matching: .images)
         .alert(alertTitle, isPresented: $showingAlert) { Button("确定", role: .cancel) {} } message: { Text(alertMessage) }
         .alert("永久删除账户？", isPresented: $showingDeleteAccountConfirmation) {
             Button("取消", role: .cancel) {}
@@ -225,23 +277,35 @@ struct AccountSettingsView: View {
         .onAppear { auth.refreshAuthMethods() }
     }
 
+    private func performPendingAvatarAction() {
+        guard let action = pendingAvatarAction else { return }
+        pendingAvatarAction = nil
+
+        switch action {
+        case .preview:
+            showingAvatarPreview = true
+        case .replace:
+            showingAvatarPicker = true
+        }
+    }
+
     private func handleAvatarSelection(_ item: PhotosPickerItem?) {
         guard let item else { return }
-        isUploadingAvatar = true
+        isPreparingAvatar = true
         HapticManager.impact(.medium)
         item.loadTransferable(type: Data.self) { result in
             DispatchQueue.main.async {
+                avatarItem = nil
+                isPreparingAvatar = false
                 switch result {
                 case .success(let data):
                     guard let data, let image = UIImage(data: data) else {
-                        isUploadingAvatar = false
                         showAlert(title: "上传失败", message: "无法读取所选图片")
                         return
                     }
-                    selectedAvatarImage = image
-                    uploadAvatar(image: image)
+                    pendingAvatarImage = image
+                    showingAvatarEditor = true
                 case .failure:
-                    isUploadingAvatar = false
                     showAlert(title: "上传失败", message: "图片加载失败,请重试")
                 }
             }
@@ -249,6 +313,7 @@ struct AccountSettingsView: View {
     }
 
     private func uploadAvatar(image: UIImage) {
+        isUploadingAvatar = true
         // 缩放到最长边 512,再压缩为 JPEG 控制体积
         let maxDimension: CGFloat = 512
         let scale = min(maxDimension / image.size.width, maxDimension / image.size.height, 1)
@@ -263,7 +328,7 @@ struct AccountSettingsView: View {
         auth.updateAvatar(jpegData) { error in
             DispatchQueue.main.async {
                 isUploadingAvatar = false
-                avatarItem = nil
+                pendingAvatarImage = nil
                 if let error {
                     selectedAvatarImage = nil
                     showAlert(title: "上传失败", message: error.localizedDescription)
@@ -291,6 +356,303 @@ struct AccountSettingsView: View {
                 alertMessage = error.localizedDescription
                 showingAlert = true
             }
+        }
+    }
+}
+
+private enum AvatarAction {
+    case preview
+    case replace
+}
+
+private struct AvatarOptionsSheet: View {
+    let onSelect: (AvatarAction) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            optionButton("查看大图") {
+                onSelect(.preview)
+            }
+
+            Divider()
+                .padding(.horizontal, 24)
+
+            optionButton("更换头像") {
+                onSelect(.replace)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+    }
+
+    private func optionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(EvenlyStyle.brandBlue)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AvatarPreviewView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let avatarUrl: String?
+    let localImage: UIImage?
+    let fallbackText: String
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            Group {
+                if let localImage {
+                    Image(uiImage: localImage)
+                        .resizable()
+                        .scaledToFit()
+                } else if let url = normalizedAvatarURL {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            fallbackAvatar
+                        }
+                    }
+                } else {
+                    fallbackAvatar
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(28)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .padding(.top, 18)
+            .padding(.trailing, 18)
+        }
+    }
+
+    private var fallbackAvatar: some View {
+        Text(String(fallbackText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased())
+            .font(.system(size: 88, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 220, height: 220)
+            .background(EvenlyStyle.brandBlue, in: Circle())
+    }
+
+    private var normalizedAvatarURL: URL? {
+        guard let avatarUrl, !avatarUrl.isEmpty else { return nil }
+        guard var components = URLComponents(string: avatarUrl) else { return nil }
+        if components.host == "cos.ismyh.cn" {
+            components.host = "evenly-1325650734.cos.ap-nanjing.myqcloud.com"
+        }
+        return components.url
+    }
+}
+
+private struct AvatarEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let image: UIImage
+    let onSave: (UIImage) -> Void
+
+    private let cropSide: CGFloat = 300
+    private let outputSide: CGFloat = 512
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var rotation: Angle = .zero
+    @State private var lastRotation: Angle = .zero
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer(minLength: 8)
+
+                ZStack {
+                    Color.black.opacity(0.92)
+
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: cropSide, height: cropSide)
+                        .scaleEffect(scale)
+                        .rotationEffect(rotation)
+                        .offset(offset)
+                        .gesture(dragGesture.simultaneously(with: magnificationGesture).simultaneously(with: rotationGesture))
+
+                    Circle()
+                        .stroke(.white.opacity(0.9), lineWidth: 2)
+                        .frame(width: cropSide, height: cropSide)
+                        .allowsHitTesting(false)
+
+                    Rectangle()
+                        .fill(.black.opacity(0.38))
+                        .mask {
+                            Rectangle()
+                                .overlay {
+                                    Circle()
+                                        .frame(width: cropSide, height: cropSide)
+                                        .blendMode(.destinationOut)
+                                }
+                        }
+                        .allowsHitTesting(false)
+                }
+                .compositingGroup()
+                .frame(width: cropSide, height: cropSide)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .shadow(color: .black.opacity(0.22), radius: 22, y: 10)
+
+                VStack(spacing: 18) {
+                    HStack {
+                        Image(systemName: "minus.magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        Slider(value: $scale, in: 1...4)
+                            .tint(EvenlyStyle.brandBlue)
+                            .onChange(of: scale) { _, newValue in
+                                lastScale = newValue
+                            }
+                        Image(systemName: "plus.magnifyingglass")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 14) {
+                        Button {
+                            rotation -= .degrees(90)
+                            lastRotation = rotation
+                            HapticManager.selection.selectionChanged()
+                        } label: {
+                            Label("左转", systemImage: "rotate.left")
+                        }
+
+                        Button {
+                            resetTransform()
+                        } label: {
+                            Label("重置", systemImage: "arrow.counterclockwise")
+                        }
+
+                        Button {
+                            rotation += .degrees(90)
+                            lastRotation = rotation
+                            HapticManager.selection.selectionChanged()
+                        } label: {
+                            Label("右转", systemImage: "rotate.right")
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 24)
+
+                Text("拖动调整位置，双指缩放或旋转。头像会按圆形区域居中裁剪。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+
+                Spacer()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("编辑头像")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("使用") {
+                        onSave(renderedAvatar())
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                lastOffset = offset
+            }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(max(lastScale * value, 1), 4)
+            }
+            .onEnded { _ in
+                lastScale = scale
+            }
+    }
+
+    private var rotationGesture: some Gesture {
+        RotationGesture()
+            .onChanged { value in
+                rotation = lastRotation + value
+            }
+            .onEnded { _ in
+                lastRotation = rotation
+            }
+    }
+
+    private func resetTransform() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.84)) {
+            scale = 1
+            lastScale = 1
+            offset = .zero
+            lastOffset = .zero
+            rotation = .zero
+            lastRotation = .zero
+        }
+        HapticManager.selection.selectionChanged()
+    }
+
+    private func renderedAvatar() -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: outputSide, height: outputSide))
+        let cropScale = outputSide / cropSide
+        let imageScale = max(cropSide / image.size.width, cropSide / image.size.height) * scale * cropScale
+        return renderer.image { context in
+            UIColor.systemBackground.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: outputSide, height: outputSide))
+
+            let cgContext = context.cgContext
+            cgContext.translateBy(
+                x: outputSide / 2 + offset.width * cropScale,
+                y: outputSide / 2 + offset.height * cropScale
+            )
+            cgContext.rotate(by: CGFloat(rotation.radians))
+            cgContext.scaleBy(x: imageScale, y: imageScale)
+            image.draw(
+                in: CGRect(
+                    x: -image.size.width / 2,
+                    y: -image.size.height / 2,
+                    width: image.size.width,
+                    height: image.size.height
+                )
+            )
         }
     }
 }

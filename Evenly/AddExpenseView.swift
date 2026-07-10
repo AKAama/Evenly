@@ -1210,6 +1210,7 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
     private var audioStreamContinuation: AsyncStream<Data>.Continuation?
     private var audioConverter: AVAudioConverter?
     private var targetAudioFormat: AVAudioFormat?
+    private var silenceDetector = VoiceSilenceDetector(silenceDuration: 1.8)
 
     func start(ledgerId: UUID) async throws {
         guard await Self.requestRecordPermission() else {
@@ -1264,12 +1265,12 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
         }
     }
 
-    func stop() {
+    func stop(automatically: Bool = false) {
         guard isRecording else { return }
         stopAudioEngine()
         isRecording = false
         isProcessing = true
-        statusMessage = "正在识别并生成草稿..."
+        statusMessage = automatically ? "检测到停顿，正在完成识别..." : "正在识别并生成草稿..."
         Task { [weak self] in
             try? await self?.sendJSON(["type": "stop"])
         }
@@ -1301,6 +1302,7 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
 
     private func resetState() {
         cancel()
+        silenceDetector = VoiceSilenceDetector(silenceDuration: 1.8)
         partialTranscript = ""
         finalTranscript = ""
         statusMessage = ""
@@ -1310,7 +1312,7 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
 
     private func configureAudioEngine() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .defaultToSpeaker])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .defaultToSpeaker])
         try session.setActive(true)
 
         let inputNode = audioEngine.inputNode
@@ -1349,9 +1351,21 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
             guard let data = Self.pcm16Data(from: buffer, converter: converter, targetFormat: targetFormat), !data.isEmpty else {
                 return
             }
+            let levelDB = VoiceSilenceDetector.rmsDB(pcm16: data)
+            let duration = Double(data.count / MemoryLayout<Int16>.size) / targetFormat.sampleRate
+            Task { @MainActor [weak self] in
+                self?.observeAudioLevel(levelDB, duration: duration)
+            }
             // 直接丢给后台串行发送流，不要在 MainActor 上 await send —— 否则被 UI 渲染阻塞
             // 会导致 stop 信号在最后一个 chunk 后排几秒才能发出去，拖慢整条链路。
             self?.audioStreamContinuation?.yield(data)
+        }
+    }
+
+    private func observeAudioLevel(_ levelDB: Double, duration: TimeInterval) {
+        guard isRecording else { return }
+        if silenceDetector.observe(levelDB: levelDB, duration: duration) {
+            stop(automatically: true)
         }
     }
 

@@ -476,4 +476,36 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual(json["icon_type"] as? String, "emoji")
         XCTAssertEqual(json["icon_value"] as? String, "🍜")
     }
+
+    func testVoiceSilenceDetectorIgnoresSilenceBeforeSpeech() {
+        var detector = VoiceSilenceDetector(silenceDuration: 1.8)
+
+        XCTAssertFalse(detector.observe(levelDB: -60, duration: 3.0))
+    }
+
+    func testVoiceSilenceDetectorStopsAfterPostSpeechSilence() {
+        var detector = VoiceSilenceDetector(silenceDuration: 1.8)
+
+        XCTAssertFalse(detector.observe(levelDB: -20, duration: 0.2))
+        XCTAssertFalse(detector.observe(levelDB: -55, duration: 0.9))
+        XCTAssertTrue(detector.observe(levelDB: -55, duration: 0.9))
+    }
+
+    func testVoiceSilenceDetectorResetsSilenceWhenSpeechResumes() {
+        var detector = VoiceSilenceDetector(silenceDuration: 1.8)
+
+        XCTAssertFalse(detector.observe(levelDB: -20, duration: 0.2))
+        XCTAssertFalse(detector.observe(levelDB: -55, duration: 1.0))
+        XCTAssertFalse(detector.observe(levelDB: -20, duration: 0.2))
+        XCTAssertFalse(detector.observe(levelDB: -55, duration: 1.0))
+    }
+
+    func testVoiceSilenceDetectorMeasuresPCM16Level() {
+        let loudSamples = [Int16.max, Int16.max, Int16.max, Int16.max]
+        let silence = Data(repeating: 0, count: 8)
+        let loud = loudSamples.withUnsafeBytes { Data($0) }
+
+        XCTAssertLessThan(VoiceSilenceDetector.rmsDB(pcm16: silence), -90)
+        XCTAssertGreaterThan(VoiceSilenceDetector.rmsDB(pcm16: loud), -1)
+    }
 }

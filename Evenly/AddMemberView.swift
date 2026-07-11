@@ -23,6 +23,10 @@ struct AddMemberView: View {
         ledger.participants.filter { !$0.isRemoved }
     }
 
+    private var isOwner: Bool {
+        auth.user?.id == ledger.ownerId
+    }
+
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -45,69 +49,70 @@ struct AddMemberView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Search Section
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20)
-                        
-                        TextField("输入邮箱或名字搜索", text: $searchText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($focusedField, equals: .search)
-                            .onSubmit {
-                                searchUser()
-                            }
-                    }
-                    .padding(.vertical, 4)
-
-                    if isSearching {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
-                    } else if let result = searchResult {
-                        searchResultView(result)
-                    }
-
-                    Button {
-                        HapticManager.impact(.medium)
-                        searchUser()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Label("搜索用户", systemImage: "magnifyingglass")
-                                .fontWeight(.medium)
-                            Spacer()
-                        }
-                    }
-                    .disabled(searchText.isEmpty || isLoading || isSearching)
-                } header: {
-                    Text("搜索成员")
-                } footer: {
-                    Text("搜索已注册用户，或添加临时成员")
-                }
-
-                // Add Temporary Member Section
-                Section {
-                    Button {
-                        showingAddTemporary = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                                .foregroundStyle(.orange)
-                            Text("添加临时成员")
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("非注册用户")
-                                .font(.caption)
+                // Invite / manage only for the ledger owner — members just browse the roster.
+                if isOwner {
+                    Section {
+                        HStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
                                 .foregroundStyle(.secondary)
+                                .frame(width: 20)
+
+                            TextField("输入邮箱或名字搜索", text: $searchText)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($focusedField, equals: .search)
+                                .onSubmit {
+                                    searchUser()
+                                }
                         }
+                        .padding(.vertical, 4)
+
+                        if isSearching {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                Spacer()
+                            }
+                        } else if let result = searchResult {
+                            searchResultView(result)
+                        }
+
+                        Button {
+                            HapticManager.impact(.medium)
+                            searchUser()
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Label("搜索用户", systemImage: "magnifyingglass")
+                                    .fontWeight(.medium)
+                                Spacer()
+                            }
+                        }
+                        .disabled(searchText.isEmpty || isLoading || isSearching)
+                    } header: {
+                        Text("邀请成员")
+                    } footer: {
+                        Text("搜索已注册用户，或添加临时成员")
                     }
-                } header: {
-                    Text("或")
+
+                    Section {
+                        Button {
+                            showingAddTemporary = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                    .foregroundStyle(.orange)
+                                Text("添加临时成员")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Text("非注册用户")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: {
+                        Text("或")
+                    }
                 }
 
                 if let error = errorMessage {
@@ -132,7 +137,7 @@ struct AddMemberView: View {
                     }
                 }
 
-                // Current Members Section
+                // Shared roster for everyone
                 Section {
                     ForEach(currentParticipants) { participant in
                         memberRowView(participant)
@@ -144,7 +149,7 @@ struct AddMemberView: View {
             }
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("成员管理")
+            .navigationTitle("成员")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -212,14 +217,14 @@ struct AddMemberView: View {
     private func memberRowView(_ participant: Person) -> some View {
         HStack(spacing: 12) {
             memberAvatar(for: participant)
-                .opacity(participant.isPending ? 0.55 : 1.0)
+                .opacity((participant.isPending || participant.isRejected) ? 0.55 : 1.0)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(participant.name)
                         .font(.body)
                         .dynamicTypeSize(.accessibility2)
-                        .foregroundStyle(participant.isPending ? .secondary : .primary)
+                        .foregroundStyle((participant.isPending || participant.isRejected) ? .secondary : .primary)
                     if participant.isPending {
                         Text("邀请中")
                             .font(.caption2)
@@ -228,11 +233,23 @@ struct AddMemberView: View {
                             .padding(.vertical, 2)
                             .background(Color.secondary.opacity(0.12))
                             .clipShape(Capsule())
+                    } else if participant.isRejected {
+                        Text("已拒绝")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.red.opacity(0.12))
+                            .clipShape(Capsule())
                     }
                 }
 
                 if participant.isPending {
                     Text("等待对方接受邀请")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if participant.isRejected {
+                    Text("对方已拒绝邀请，可再次邀请")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if participant.userId != nil {
@@ -249,12 +266,24 @@ struct AddMemberView: View {
             Spacer()
 
             if auth.user?.id == ledger.ownerId, participant.userId != ledger.ownerId {
-                Button(role: .destructive) {
-                    HapticManager.notificationOccurred(.warning)
-                    deleteMember(participant)
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
+                if participant.isRejected {
+                    Button {
+                        HapticManager.impact(.light)
+                        reinviteMember(participant)
+                    } label: {
+                        Text("再次邀请")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    .disabled(isLoading)
+                } else {
+                    Button(role: .destructive) {
+                        HapticManager.notificationOccurred(.warning)
+                        deleteMember(participant)
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundStyle(.red)
+                    }
                 }
             }
         }
@@ -262,21 +291,35 @@ struct AddMemberView: View {
 
     @ViewBuilder
     private func memberAvatar(for participant: Person) -> some View {
-        if participant.isTemporary {
-            ZStack {
-                Circle()
-                    .fill(Color.orange.opacity(0.16))
-                Image(systemName: "person.fill")
-                    .font(.headline)
-                    .foregroundStyle(.orange)
+        let isOwner = participant.userId != nil && participant.userId == ledger.ownerId
+        ZStack(alignment: .topTrailing) {
+            if participant.isTemporary {
+                ZStack {
+                    Circle()
+                        .fill(Color.orange.opacity(0.16))
+                    Image(systemName: "person.fill")
+                        .font(.headline)
+                        .foregroundStyle(.orange)
+                }
+                .frame(width: 40, height: 40)
+            } else {
+                RemoteAvatarView(
+                    avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
+                    fallbackText: participant.name,
+                    size: 40
+                )
             }
-            .frame(width: 40, height: 40)
-        } else {
-            RemoteAvatarView(
-                avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
-                fallbackText: participant.name,
-                size: 40
-            )
+
+            if isOwner {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.orange)
+                    .padding(3)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .overlay(Circle().stroke(Color.orange.opacity(0.35), lineWidth: 0.8))
+                    .offset(x: 4, y: -4)
+                    .accessibilityLabel("账本创建者")
+            }
         }
     }
 
@@ -415,6 +458,11 @@ struct AddMemberView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func reinviteMember(_ participant: Person) {
+        guard let userId = participant.userId else { return }
+        addRegisteredMember(userId: userId, displayName: participant.name)
     }
 
     private func addTemporaryMember() {

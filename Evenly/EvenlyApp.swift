@@ -14,6 +14,10 @@ struct EvenlyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    // Warm Taptic Engine generators so first press feels instant.
+                    HapticManager.prepare()
+                }
         }
     }
 }

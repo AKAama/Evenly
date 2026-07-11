@@ -35,6 +35,9 @@ final class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
 
     @Published private(set) var pendingDestination: NotificationDestination?
+    /// Bumped whenever a remote notification is delivered (foreground banner or tap).
+    /// Views observe this to refresh invites/ledgers without waiting for relaunch.
+    @Published private(set) var remoteRefreshTick: UInt = 0
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
 
     private let api = APIClient.shared
@@ -54,10 +57,19 @@ final class NotificationManager: NSObject, ObservableObject {
         let settings = await center.notificationSettings()
         authorizationStatus = settings.authorizationStatus
         if settings.authorizationStatus == .notDetermined {
-            _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
+            do {
+                _ = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+            } catch {
+                print("Notification authorization request failed: \(error.localizedDescription)")
+            }
             authorizationStatus = (await center.notificationSettings()).authorizationStatus
         }
-        guard authorizationStatus == .authorized || authorizationStatus == .provisional else { return }
+        guard authorizationStatus == .authorized
+            || authorizationStatus == .provisional
+            || authorizationStatus == .ephemeral else {
+            print("Notifications not authorized (status=\(authorizationStatus.rawValue)); skipping APNs register")
+            return
+        }
         UIApplication.shared.registerForRemoteNotifications()
         if let token = UserDefaults.standard.string(forKey: tokenKey) {
             await register(token: token)
@@ -67,20 +79,40 @@ final class NotificationManager: NSObject, ObservableObject {
     func receivedDeviceToken(_ data: Data) {
         let token = Self.hexToken(data)
         UserDefaults.standard.set(token, forKey: tokenKey)
+        print("APNs device token received (\(token.prefix(12))…)")
         Task { await register(token: token) }
     }
 
     func unregisterCurrentDevice() async {
         guard let token = UserDefaults.standard.string(forKey: tokenKey), api.currentToken != nil else { return }
-        try? await api.delete(APIEndpoints.pushDevice(token: token))
+        do {
+            try await api.delete(APIEndpoints.pushDevice(token: token))
+        } catch {
+            print("Failed to unregister push device: \(error.localizedDescription)")
+        }
     }
 
     func consumeDestination() {
         pendingDestination = nil
     }
 
+    /// Called for both foreground delivery and user taps so in-app state stays fresh.
+    func handleRemoteNotification(userInfo: [AnyHashable: Any], openedByUser: Bool) {
+        remoteRefreshTick &+= 1
+        let destination = NotificationDestination(userInfo: userInfo)
+        if openedByUser {
+            pendingDestination = destination
+        } else if destination == .invitations {
+            // Foreground invite: still surface the in-app banner via data refresh;
+            // pendingDestination is reserved for navigation on explicit taps.
+        }
+    }
+
     private func register(token: String) async {
-        guard api.currentToken != nil else { return }
+        guard api.currentToken != nil else {
+            print("Skipping push device register: not authenticated")
+            return
+        }
         #if DEBUG
         let environment = "sandbox"
         #else
@@ -90,7 +122,12 @@ final class NotificationManager: NSObject, ObservableObject {
             environment: environment,
             bundleId: Bundle.main.bundleIdentifier ?? "com.yhma.Evenly"
         )
-        let _: EmptyResponse? = try? await api.put(APIEndpoints.pushDevice(token: token), body: request)
+        do {
+            let _: EmptyResponse = try await api.put(APIEndpoints.pushDevice(token: token), body: request)
+            print("Push device registered environment=\(environment)")
+        } catch {
+            print("Failed to register push device: \(error.localizedDescription)")
+        }
     }
 }
 
@@ -99,15 +136,21 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
+        let userInfo = notification.request.content.userInfo
+        await MainActor.run {
+            self.handleRemoteNotification(userInfo: userInfo, openedByUser: false)
+        }
+        return [.banner, .sound, .badge]
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        let destination = NotificationDestination(userInfo: response.notification.request.content.userInfo)
-        await MainActor.run { self.pendingDestination = destination }
+        let userInfo = response.notification.request.content.userInfo
+        await MainActor.run {
+            self.handleRemoteNotification(userInfo: userInfo, openedByUser: true)
+        }
     }
 }
 
@@ -124,5 +167,16 @@ final class EvenlyAppDelegate: NSObject, UIApplicationDelegate {
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         print("APNs registration failed: \(error.localizedDescription)")
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Task { @MainActor in
+            NotificationManager.shared.handleRemoteNotification(userInfo: userInfo, openedByUser: false)
+            completionHandler(.newData)
+        }
     }
 }

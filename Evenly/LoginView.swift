@@ -32,6 +32,12 @@ struct LoginView: View {
         }
     }
 
+    private var canSubmitLogin: Bool {
+        !auth.isLoading
+            && !auth.loginIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !auth.loginPassword.isEmpty
+    }
+
     private var loginView: some View {
         ZStack {
             EvenlyStyle.softBackground
@@ -52,153 +58,31 @@ struct LoginView: View {
                 .offset(x: 240, y: 390)
                 .allowsHitTesting(false)
 
-            VStack(spacing: 20) {
-                    Spacer(minLength: 12)
+            VStack(spacing: 0) {
+                Spacer(minLength: 28)
 
-                    Image("LoginLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 88, height: 88)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .accessibilityLabel("Evenly 图标")
-                        .accessibilityIdentifier("login-logo")
-                        .shadow(color: EvenlyStyle.blue.opacity(0.25), radius: 24, y: 10)
+                // 1) Brand — calm, not competing with actions
+                brandHeader
+                    .padding(.bottom, 28)
 
-                    VStack(spacing: 8) {
-                        Text("Evenly")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.primary)
-
-                        Text("轻松分摊，愉快记账")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 4)
-
-                    VStack(spacing: 16) {
-                        CustomTextField(
-                            icon: "envelope.fill",
-                            placeholder: "邮箱或用户名",
-                            text: $auth.loginIdentifier,
-                            focusedField: $focusedField,
-                            field: .identifier
-                        )
-                        .keyboardType(.emailAddress)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .password }
-                        .accessibilityIdentifier("login-email")
-                        .id(LoginField.identifier)
-
-                        CustomSecureField(
-                            icon: "lock.fill",
-                            placeholder: "密码",
-                            text: $auth.loginPassword,
-                            focusedField: $focusedField,
-                            field: .password
-                        )
-                        .submitLabel(.go)
-                        .onSubmit { submitLogin() }
-                        .accessibilityIdentifier("login-password")
-                        .id(LoginField.password)
-
-                        if let error = auth.loginError {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.red)
-                                Text(error)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
-                            .multilineTextAlignment(.center)
-                        }
-
-                        Button(action: submitLogin) {
-                            HStack {
-                                if auth.isLoading {
-                                    ProgressView()
-                                        .tint(.white)
-                                } else {
-                                    Text("登录")
-                                        .fontWeight(.semibold)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                            .fill(auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty ? Color.gray : EvenlyStyle.blue)
-                            )
-                            .foregroundStyle(.white)
-                        }
-                        .buttonStyle(.spring(.medium))
-                        .disabled(auth.isLoading || auth.loginIdentifier.isEmpty || auth.loginPassword.isEmpty)
-
-                        HStack {
-                            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
-                            Text("或").font(.caption).foregroundStyle(.secondary)
-                            Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
-                        }
-
-                        SignInWithAppleButton(
-                            .signIn,
-                            onRequest: auth.prepareAppleSignIn,
-                            onCompletion: auth.handleAppleSignIn
-                        )
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(height: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .disabled(auth.isLoading)
-                        .accessibilityIdentifier("sign-in-with-apple")
-                    }
+                // 2) Primary path — account login
+                loginFormCard
                     .padding(.horizontal, 24)
 
-                    Button("忘记密码？") {
-                        focusedField = nil
-                        isShowingPasswordReset = true
-                    }
-                    .font(.subheadline)
-
-                    Button {
-                        HapticManager.impact(.light)
-                        isShowingRegister = true
-                    } label: {
-                        HStack {
-                            Text("还没有账号？")
-                                .foregroundStyle(.secondary)
-                            Text("立即注册")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.blue)
-                        }
-                        .font(.subheadline)
-                    }
-
-                    Button {
-                        HapticManager.impact(.light)
-                        auth.enterGuestMode()
-                    } label: {
-                        Label("无需登录，本地使用", systemImage: "iphone")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.blue)
+                // 3) Secondary path — Apple
+                alternativeSignInSection
+                    .padding(.top, 22)
                     .padding(.horizontal, 24)
-                    .accessibilityIdentifier("continue-as-guest")
 
-                    Text("本地模式无需注册，数据仅保存在这台设备上。登录后可使用云同步与多人协作。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
+                Spacer(minLength: 20)
 
-                    Spacer(minLength: 12)
+                // 4) Tertiary — register / guest (text-level, not full-width CTAs)
+                footerActions
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
             }
-            .frame(maxWidth: 620)
+            .frame(maxWidth: 440)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 18)
         }
         .ignoresSafeArea(.keyboard)
         .navigationBarHidden(true)
@@ -207,6 +91,229 @@ struct LoginView: View {
                 Spacer()
                 Button("完成") { focusedField = nil }
             }
+        }
+    }
+
+    private var brandHeader: some View {
+        VStack(spacing: 14) {
+            Image("LoginLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.55), lineWidth: 0.8)
+                }
+                .shadow(color: EvenlyStyle.brandBlue.opacity(0.20), radius: 22, y: 10)
+                .accessibilityLabel("Evenly 图标")
+                .accessibilityIdentifier("login-logo")
+
+            VStack(spacing: 6) {
+                Text("Evenly")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .tracking(-0.6)
+                    .foregroundStyle(.primary)
+                Text("轻松分摊，愉快记账")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var loginFormCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("账号登录")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+
+            VStack(spacing: 12) {
+                CustomTextField(
+                    icon: "envelope.fill",
+                    placeholder: "邮箱或用户名",
+                    text: $auth.loginIdentifier,
+                    focusedField: $focusedField,
+                    field: .identifier
+                )
+                .keyboardType(.emailAddress)
+                .submitLabel(.next)
+                .onSubmit { focusedField = .password }
+                .accessibilityIdentifier("login-email")
+                .id(LoginField.identifier)
+
+                CustomSecureField(
+                    icon: "lock.fill",
+                    placeholder: "密码",
+                    text: $auth.loginPassword,
+                    focusedField: $focusedField,
+                    field: .password
+                )
+                .submitLabel(.go)
+                .onSubmit { submitLogin() }
+                .accessibilityIdentifier("login-password")
+                .id(LoginField.password)
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+                Button("忘记密码？") {
+                    focusedField = nil
+                    HapticManager.press()
+                    isShowingPasswordReset = true
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(EvenlyStyle.brandBlue)
+                .buttonStyle(.plain)
+            }
+            .padding(.top, -6)
+
+            if let error = auth.loginError {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .padding(.top, 1)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.red.opacity(0.08))
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+
+            // Single primary CTA — filled, continuous corner, press feedback via springPrimary
+            Button(action: submitLogin) {
+                HStack(spacing: 8) {
+                    if auth.isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("登录")
+                            .font(.body.weight(.semibold))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(canSubmitLogin ? EvenlyStyle.brandBlue : Color.secondary.opacity(0.28))
+                        .shadow(
+                            color: canSubmitLogin ? EvenlyStyle.brandBlue.opacity(0.28) : .clear,
+                            radius: 14,
+                            y: 6
+                        )
+                }
+                .foregroundStyle(.white)
+                .animation(EvenlyMotion.press, value: canSubmitLogin)
+            }
+            .buttonStyle(.springPrimary)
+            .disabled(!canSubmitLogin)
+            .padding(.top, 4)
+            .accessibilityIdentifier("login-submit")
+        }
+        .padding(20)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground).opacity(0.92))
+                )
+                .shadow(color: Color.black.opacity(0.07), radius: 28, y: 12)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.55),
+                            Color.white.opacity(0.12),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.8
+                )
+        }
+    }
+
+    private var alternativeSignInSection: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.14))
+                    .frame(height: 1)
+                Text("其他方式")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                Capsule()
+                    .fill(Color.secondary.opacity(0.14))
+                    .frame(height: 1)
+            }
+
+            // Secondary path — present, but not competing with the primary filled CTA
+            SignInWithAppleButton(
+                .signIn,
+                onRequest: auth.prepareAppleSignIn,
+                onCompletion: auth.handleAppleSignIn
+            )
+            .signInWithAppleButtonStyle(.black)
+            .frame(height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            }
+            .disabled(auth.isLoading)
+            .opacity(auth.isLoading ? 0.55 : 1)
+            .accessibilityIdentifier("sign-in-with-apple")
+        }
+    }
+
+    private var footerActions: some View {
+        VStack(spacing: 16) {
+            Button {
+                focusedField = nil
+                HapticManager.press()
+                isShowingRegister = true
+            } label: {
+                (
+                    Text("还没有账号？")
+                        .foregroundStyle(.secondary)
+                    + Text("立即注册")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(EvenlyStyle.brandBlue)
+                )
+                .font(.subheadline)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                focusedField = nil
+                HapticManager.press()
+                auth.enterGuestMode()
+            } label: {
+                Text("先本地试用，稍后再登录")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("continue-as-guest")
+
+            Text("本地数据仅保存在本机。登录后可云同步与多人协作。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
+                .padding(.horizontal, 12)
         }
     }
 
@@ -310,277 +417,534 @@ struct ForgotPasswordView: View {
     }
 }
 
-// MARK: - Register View
+// MARK: - Register View (stepped wizard — not a long survey form)
 
 struct RegisterView: View {
     @EnvironmentObject var auth: AuthManager
     @Binding var isShowingRegister: Bool
-    @State private var avatarImage: UIImage?
-    @State private var showingImagePicker = false
+
+    private enum Step: Int, CaseIterable {
+        case email = 0
+        case password = 1
+        case profile = 2
+
+        var title: String {
+            switch self {
+            case .email: return "用邮箱开始"
+            case .password: return "设置密码"
+            case .profile: return "怎么称呼你"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .email: return "我们会发一封验证码，确认是你本人"
+            case .password: return "至少 6 位，登录时用得到"
+            case .profile: return "朋友在账本里会看到这个名字"
+            }
+        }
+    }
+
+    private enum RegisterField: Hashable {
+        case email, code, password, confirmPassword, displayName, username
+    }
+
+    @State private var step: Step = .email
     @State private var username = ""
     @State private var displayName = ""
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
-    @State private var usernameChecked = false
-    @State private var isCheckingUsername = false
     @State private var codeSent = false
+    @State private var isPasswordVisible = false
     @FocusState private var focusedField: RegisterField?
 
-    enum RegisterField: Hashable {
-        case displayName, username, email, code, password, confirmPassword
-    }
-
     var body: some View {
-        ScrollViewReader { proxy in
-        ScrollView {
-            dismissKeyboardGesture
-            VStack(spacing: 24) {
-                Spacer().frame(height: 20)
+        ZStack {
+            EvenlyStyle.softBackground
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = nil }
 
-                // Avatar placeholder
-                ZStack {
-                    Circle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(width: 100, height: 100)
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.secondary)
-                }
+            Circle()
+                .fill(EvenlyStyle.blue.opacity(0.10))
+                .frame(width: 280, height: 280)
+                .blur(radius: 2)
+                .offset(x: -200, y: -320)
+                .allowsHitTesting(false)
 
-                Text("点击上传头像")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Circle()
+                .fill(EvenlyStyle.indigo.opacity(0.08))
+                .frame(width: 220, height: 220)
+                .offset(x: 220, y: 360)
+                .allowsHitTesting(false)
 
-                VStack(spacing: 16) {
-                    HStack {
-                        Image(systemName: "person.text.rectangle")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    stepIndicator
+                        .padding(.top, 12)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(step.title)
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .tracking(-0.4)
+                            .foregroundStyle(.primary)
+                        Text(step.subtitle)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        TextField("显示名称", text: $displayName)
-                            .focused($focusedField, equals: .displayName)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
-                    .id(RegisterField.displayName)
+                    .id(step)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
 
-                    // 用户名
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Image(systemName: "person.fill")
-                                .foregroundStyle(.secondary)
-                            TextField("用户名", text: $username)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .focused($focusedField, equals: .username)
-                                .onChange(of: username) { _, newValue in
-                                    usernameChecked = false
-                                }
-                        }
-                        .padding()
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        .id(RegisterField.username)
-
-                        if !username.isEmpty && !auth.isValidUsername(username) {
-                            Text("用户名必须以英文开头，可包含英文、数字、下划线，至少3位")
-                                .font(.caption2)
-                                .foregroundStyle(.red)
-                        } else if usernameChecked {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                Text("用户名可用")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    }
-
-                    // 邮箱
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Image(systemName: "envelope.fill")
-                                .foregroundStyle(.secondary)
-                            TextField("邮箱", text: $email)
-                                .keyboardType(.emailAddress)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .focused($focusedField, equals: .email)
-                        }
-                        .padding()
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        .id(RegisterField.email)
-
-                        if !email.isEmpty && !auth.isValidEmail(email) {
-                            Text("请输入有效的邮箱地址")
-                                .font(.caption2)
-                                .foregroundStyle(.red)
-                        }
-
-                        // 发送验证码按钮
-                        if auth.isValidEmail(email) && !codeSent {
-                            Button {
-                                auth.sendVerificationCode(email: email) { error in
-                                    if error == nil {
-                                        codeSent = true
-                                    } else {
-                                        auth.registerError = error?.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    if auth.isSendingCode {
-                                        ProgressView()
-                                            .tint(.blue)
-                                    } else {
-                                        Text("发送验证码")
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                            }
-                            .disabled(auth.isSendingCode)
-                        }
-
-                        // 验证码输入
-                        if codeSent {
-                            HStack {
-                                Image(systemName: "lock.fill")
-                                    .foregroundStyle(.secondary)
-                                TextField("验证码", text: $auth.verificationCode)
-                                    .keyboardType(.numberPad)
-                                    .focused($focusedField, equals: .code)
-                            }
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
-                            .id(RegisterField.code)
-                        }
-                    }
-
-                    // 密码
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Image(systemName: "lock.fill")
-                                .foregroundStyle(.secondary)
-                            SecureField("密码", text: $password)
-                                .focused($focusedField, equals: .password)
-                        }
-                        .padding()
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        .id(RegisterField.password)
-
-                        if password.count > 0 && password.count < 6 {
-                            Text("密码至少6位")
-                                .font(.caption2)
-                                .foregroundStyle(.red)
-                        }
-                    }
-
-                    // 确认密码
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Image(systemName: "lock.fill")
-                                .foregroundStyle(.secondary)
-                            SecureField("确认密码", text: $confirmPassword)
-                                .focused($focusedField, equals: .confirmPassword)
-                        }
-                        .padding()
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        .id(RegisterField.confirmPassword)
-
-                        if !confirmPassword.isEmpty && password != confirmPassword {
-                            Text("两次输入的密码不一致")
-                                .font(.caption2)
-                                .foregroundStyle(.red)
-                        }
-                    }
+                    stepCard
+                        .id("card-\(step.rawValue)")
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
 
                     if let error = auth.registerError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .multilineTextAlignment(.center)
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .padding(.top, 1)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.red.opacity(0.08))
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     }
 
-                    Button {
-                        register()
-                    } label: {
-                        HStack {
-                            if auth.isLoading {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("注册")
-                            }
+                    primaryButton
+
+                    if step == .email {
+                        Button {
+                            HapticManager.press()
+                            isShowingRegister = false
+                        } label: {
+                            (
+                                Text("已有账号？")
+                                    .foregroundStyle(.secondary)
+                                + Text("返回登录")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(EvenlyStyle.brandBlue)
+                            )
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(canRegister ? Color.blue : Color.gray)
-                        .foregroundStyle(.white)
-                        .cornerRadius(12)
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
                     }
-                    .disabled(!canRegister || auth.isLoading)
+
+                    Spacer(minLength: 32)
                 }
                 .padding(.horizontal, 24)
-
-                Spacer().frame(height: 20)
-
-                Button {
-                    isShowingRegister = false
-                } label: {
-                    Text("已有账号？返回登录")
-                        .font(.subheadline)
-                }
-
-                Spacer().frame(height: 40)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 440)
+                .frame(maxWidth: .infinity)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .scrollIndicators(.hidden)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .onChange(of: focusedField) { _, field in
-            guard let field else { return }
-            withAnimation { proxy.scrollTo(field, anchor: .bottom) }
-        }
-        }
-        .navigationTitle("注册")
+        .ignoresSafeArea(.keyboard)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("取消") {
-                    isShowingRegister = false
+                Button(step == .email ? "取消" : "上一步") {
+                    HapticManager.press()
+                    withAnimation(EvenlyMotion.ui) { goBack() }
+                }
+            }
+            ToolbarItem(placement: .principal) {
+                Text("注册")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { focusedField = nil }
+            }
+        }
+        .animation(EvenlyMotion.ui, value: step)
+        .animation(EvenlyMotion.press, value: codeSent)
+        .animation(EvenlyMotion.press, value: auth.registerError)
+        .onAppear { HapticManager.prepare() }
+    }
+
+    private var stepIndicator: some View {
+        HStack(spacing: 8) {
+            ForEach(Step.allCases, id: \.rawValue) { item in
+                Capsule()
+                    .fill(item.rawValue <= step.rawValue ? EvenlyStyle.brandBlue : Color.secondary.opacity(0.18))
+                    .frame(height: 4)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("注册进度，第 \(step.rawValue + 1) 步，共 \(Step.allCases.count) 步")
+    }
+
+    @ViewBuilder
+    private var stepCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch step {
+            case .email:
+                emailStepContent
+            case .password:
+                passwordStepContent
+            case .profile:
+                profileStepContent
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground).opacity(0.92))
+                )
+                .shadow(color: Color.black.opacity(0.07), radius: 28, y: 12)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.55),
+                            Color.white.opacity(0.12),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.8
+                )
+        }
+    }
+
+    private var emailStepContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            registerField(
+                icon: "envelope.fill",
+                isFocused: focusedField == .email
+            ) {
+                TextField("邮箱", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focusedField, equals: .email)
+                    .submitLabel(codeSent ? .next : .send)
+                    .onSubmit {
+                        if codeSent {
+                            focusedField = .code
+                        } else if canSendCode {
+                            sendCode()
+                        }
+                    }
+            }
+
+            if !email.isEmpty && !auth.isValidEmail(email) {
+                fieldHint("请输入有效的邮箱地址", isError: true)
+            }
+
+            if codeSent {
+                registerField(icon: "number", isFocused: focusedField == .code) {
+                    TextField("6 位验证码", text: $auth.verificationCode)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .focused($focusedField, equals: .code)
+                }
+
+                HStack {
+                    Text("验证码已发送到邮箱")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        sendCode()
+                    } label: {
+                        if auth.isSendingCode {
+                            ProgressView()
+                        } else {
+                            Text("重新发送")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(EvenlyStyle.brandBlue)
+                        }
+                    }
+                    .disabled(auth.isSendingCode)
                 }
             }
         }
     }
 
-    // 点击空白处收起键盘
-    private var dismissKeyboardGesture: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture {
-                hideKeyboard()
+    private var passwordStepContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            registerField(icon: "lock.fill", isFocused: focusedField == .password) {
+                Group {
+                    if isPasswordVisible {
+                        TextField("密码（至少 6 位）", text: $password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField("密码（至少 6 位）", text: $password)
+                    }
+                }
+                .focused($focusedField, equals: .password)
+                .submitLabel(.next)
+                .onSubmit { focusedField = .confirmPassword }
+
+                Button {
+                    HapticManager.selectionChanged()
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
+
+            if !password.isEmpty && password.count < 6 {
+                fieldHint("密码至少 6 位", isError: true)
+            }
+
+            registerField(icon: "lock.rotation", isFocused: focusedField == .confirmPassword) {
+                SecureField("再输入一次", text: $confirmPassword)
+                    .focused($focusedField, equals: .confirmPassword)
+                    .submitLabel(.continue)
+                    .onSubmit {
+                        if canContinuePassword {
+                            withAnimation(EvenlyMotion.ui) { advanceFromPassword() }
+                        }
+                    }
+            }
+
+            if !confirmPassword.isEmpty && password != confirmPassword {
+                fieldHint("两次输入不一致", isError: true)
+            }
+        }
     }
 
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    private var profileStepContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("头像可以之后在设置里再加，先把名字定好就行。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            registerField(icon: "person.text.rectangle", isFocused: focusedField == .displayName) {
+                TextField("显示名称（朋友会看到）", text: $displayName)
+                    .focused($focusedField, equals: .displayName)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .username }
+            }
+
+            registerField(icon: "at", isFocused: focusedField == .username) {
+                TextField("用户名（登录用）", text: $username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focusedField, equals: .username)
+                    .submitLabel(.join)
+                    .onSubmit {
+                        if canRegister { register() }
+                    }
+            }
+
+            if !username.isEmpty && !auth.isValidUsername(username) {
+                fieldHint("英文开头，可含数字和下划线，至少 3 位", isError: true)
+            } else if auth.isValidUsername(username) {
+                fieldHint("登录时也可用 @\(username)", isError: false)
+            }
+        }
+    }
+
+    private var primaryButton: some View {
+        Button {
+            HapticManager.impact(.medium)
+            handlePrimary()
+        } label: {
+            HStack {
+                if auth.isLoading || auth.isSendingCode {
+                    ProgressView().tint(.white)
+                } else {
+                    Text(primaryTitle)
+                        .font(.body.weight(.semibold))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(primaryEnabled ? EvenlyStyle.brandBlue : Color.secondary.opacity(0.28))
+                    .shadow(
+                        color: primaryEnabled ? EvenlyStyle.brandBlue.opacity(0.28) : .clear,
+                        radius: 14,
+                        y: 6
+                    )
+            }
+            .foregroundStyle(.white)
+        }
+        .buttonStyle(.springPrimary)
+        .disabled(!primaryEnabled || auth.isLoading || auth.isSendingCode)
+        .animation(EvenlyMotion.press, value: primaryEnabled)
+    }
+
+    private var primaryTitle: String {
+        switch step {
+        case .email:
+            return codeSent ? "下一步" : "发送验证码"
+        case .password:
+            return "下一步"
+        case .profile:
+            return "完成注册"
+        }
+    }
+
+    private var primaryEnabled: Bool {
+        switch step {
+        case .email:
+            return codeSent ? canContinueEmail : canSendCode
+        case .password:
+            return canContinuePassword
+        case .profile:
+            return canRegister
+        }
+    }
+
+    private var canSendCode: Bool {
+        auth.isValidEmail(email)
+    }
+
+    private var canContinueEmail: Bool {
+        canSendCode && codeSent && !auth.verificationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canContinuePassword: Bool {
+        password.count >= 6 && password == confirmPassword
     }
 
     private var canRegister: Bool {
-        auth.isValidUsername(username) &&
-        !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        auth.isValidEmail(email) &&
-        codeSent &&
-        !auth.verificationCode.isEmpty &&
-        password.count >= 6 &&
-        password == confirmPassword
+        canContinueEmail
+            && canContinuePassword
+            && auth.isValidUsername(username)
+            && !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private func registerField<Content: View>(
+        icon: String,
+        isFocused: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body.weight(.medium))
+                .foregroundStyle(isFocused ? EvenlyStyle.brandBlue : .secondary)
+                .frame(width: 20)
+                .animation(EvenlyMotion.press, value: isFocused)
+            content()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.tertiarySystemFill))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    isFocused ? EvenlyStyle.brandBlue.opacity(0.85) : Color.primary.opacity(0.06),
+                    lineWidth: isFocused ? 1.5 : 1
+                )
+        }
+        .shadow(
+            color: isFocused ? EvenlyStyle.brandBlue.opacity(0.12) : .clear,
+            radius: 10,
+            y: 3
+        )
+        .animation(EvenlyMotion.press, value: isFocused)
+    }
+
+    private func fieldHint(_ text: String, isError: Bool) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(isError ? .red : .secondary)
+    }
+
+    private func handlePrimary() {
+        auth.registerError = nil
+        switch step {
+        case .email:
+            if codeSent {
+                focusedField = nil
+                withAnimation(EvenlyMotion.ui) { step = .password }
+            } else {
+                sendCode()
+            }
+        case .password:
+            withAnimation(EvenlyMotion.ui) { advanceFromPassword() }
+        case .profile:
+            register()
+        }
+    }
+
+    private func advanceFromPassword() {
+        focusedField = nil
+        step = .profile
+        if displayName.isEmpty {
+            // Sensible default so the last step feels short.
+            displayName = email.split(separator: "@").first.map(String.init) ?? ""
+        }
+        if username.isEmpty {
+            let base = displayName
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "_")
+                .filter { $0.isLetter || $0.isNumber || $0 == "_" }
+            if auth.isValidUsername(base) {
+                username = base
+            } else if let first = base.first, first.isNumber {
+                username = "u_\(base)"
+            }
+        }
+    }
+
+    private func goBack() {
+        auth.registerError = nil
+        focusedField = nil
+        switch step {
+        case .email:
+            isShowingRegister = false
+        case .password:
+            step = .email
+        case .profile:
+            step = .password
+        }
+    }
+
+    private func sendCode() {
+        auth.sendVerificationCode(email: email) { error in
+            Task { @MainActor in
+                if error == nil {
+                    withAnimation(EvenlyMotion.press) {
+                        codeSent = true
+                    }
+                    focusedField = .code
+                    HapticManager.notificationOccurred(.success)
+                } else {
+                    auth.registerError = error?.localizedDescription
+                    HapticManager.notificationOccurred(.error)
+                }
+            }
+        }
     }
 
     private func register() {
+        focusedField = nil
         auth.signUp(
             username: username,
             displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -588,14 +952,48 @@ struct RegisterView: View {
             phone: "",
             password: password
         ) { error in
-            if error == nil {
-                isShowingRegister = false
+            Task { @MainActor in
+                if error == nil {
+                    HapticManager.notificationOccurred(.success)
+                    // Auth state change leaves LoginView; no need to flip the register flag.
+                } else {
+                    HapticManager.notificationOccurred(.error)
+                }
             }
         }
     }
 }
 
 // MARK: - Custom Fields
+
+private struct LoginFieldChrome: ViewModifier {
+    let isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.tertiarySystemFill))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        isFocused
+                            ? EvenlyStyle.brandBlue.opacity(0.85)
+                            : Color.primary.opacity(0.06),
+                        lineWidth: isFocused ? 1.5 : 1
+                    )
+            }
+            .shadow(
+                color: isFocused ? EvenlyStyle.brandBlue.opacity(0.12) : .clear,
+                radius: 10,
+                y: 3
+            )
+            .animation(EvenlyMotion.press, value: isFocused)
+    }
+}
 
 private struct CustomTextField: View {
     let icon: String
@@ -604,27 +1002,22 @@ private struct CustomTextField: View {
     let focusedField: FocusState<LoginField?>.Binding
     let field: LoginField
 
+    private var isFocused: Bool { focusedField.wrappedValue == field }
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(focusedField.wrappedValue == field ? .blue : .secondary)
+                .font(.body.weight(.medium))
+                .foregroundStyle(isFocused ? EvenlyStyle.brandBlue : .secondary)
                 .frame(width: 20)
+                .animation(EvenlyMotion.press, value: isFocused)
 
             TextField(placeholder, text: $text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused(focusedField, equals: field)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemGray6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(focusedField.wrappedValue == field ? Color.blue : Color.clear, lineWidth: 2)
-                )
-        )
+        .modifier(LoginFieldChrome(isFocused: isFocused))
     }
 }
 
@@ -636,39 +1029,43 @@ private struct CustomSecureField: View {
     let field: LoginField
     @State private var isPasswordVisible = false
 
+    private var isFocused: Bool { focusedField.wrappedValue == field }
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(focusedField.wrappedValue == field ? .blue : .secondary)
+                .font(.body.weight(.medium))
+                .foregroundStyle(isFocused ? EvenlyStyle.brandBlue : .secondary)
                 .frame(width: 20)
+                .animation(EvenlyMotion.press, value: isFocused)
 
-            if isPasswordVisible {
-                TextField(placeholder, text: $text)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused(focusedField, equals: field)
-            } else {
-                SecureField(placeholder, text: $text)
-                    .focused(focusedField, equals: field)
+            Group {
+                if isPasswordVisible {
+                    TextField(placeholder, text: $text)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
             }
+            .focused(focusedField, equals: field)
 
             Button {
-                isPasswordVisible.toggle()
+                HapticManager.selectionChanged()
+                withAnimation(EvenlyMotion.press) {
+                    isPasswordVisible.toggle()
+                }
             } label: {
                 Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                    .font(.body)
                     .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPasswordVisible ? "隐藏密码" : "显示密码")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemGray6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(focusedField.wrappedValue == field ? Color.blue : Color.clear, lineWidth: 2)
-                )
-        )
+        .modifier(LoginFieldChrome(isFocused: isFocused))
     }
 }
 

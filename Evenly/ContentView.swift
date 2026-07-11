@@ -28,6 +28,7 @@ struct ContentView: View {
     @State private var respondingExpenseIds: Set<UUID> = []
     @State private var actionError: String?
     @State private var showingLeaveLedgerAlert = false
+    @State private var showingDeleteLedgerAlert = false
     @State private var didLongPressLedgerMenu = false
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
@@ -58,8 +59,8 @@ struct ContentView: View {
         case ledgerDrawer
         case addLedger
         case addExpense
-        case memberManagement(Ledger)
-        case memberList(Ledger)
+        /// Single members surface: roster for all; invite/manage tools for owner only.
+        case members(Ledger)
         case expenseDetail(Expense, Ledger)
 
         var id: String {
@@ -67,8 +68,7 @@ struct ContentView: View {
             case .ledgerDrawer: return "ledgerDrawer"
             case .addLedger: return "addLedger"
             case .addExpense: return "addExpense"
-            case .memberManagement(let ledger): return "memberMgmt-\(ledger.id.uuidString)"
-            case .memberList(let ledger): return "memberList-\(ledger.id.uuidString)"
+            case .members(let ledger): return "members-\(ledger.id.uuidString)"
             case .expenseDetail(let expense, _): return "expense-\(expense.id.uuidString)"
             }
         }
@@ -106,6 +106,16 @@ struct ContentView: View {
             } message: {
                 Text("退出后将无法继续查看该账本。")
             }
+            .alert("删除账本", isPresented: $showingDeleteLedgerAlert) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) {
+                    if let ledger = ledgerStore.currentLedger {
+                        deleteCurrentLedger(ledger)
+                    }
+                }
+            } message: {
+                Text("将永久删除「\(ledgerStore.currentLedger?.title ?? "该账本")」及其中账单，此操作无法撤销。")
+            }
             .alert(
                 "删除账单",
                 isPresented: Binding(
@@ -142,11 +152,6 @@ struct ContentView: View {
                             Label("账本", systemImage: "book.fill")
                         }
                         .tag(0)
-                        .onAppear {
-                            if let userId = auth.user?.id {
-                                ledgerStore.bind(userId: userId)
-                            }
-                        }
 
                     SettingsView()
                         .tabItem {
@@ -155,6 +160,10 @@ struct ContentView: View {
                         .tag(1)
                 }
                 .tint(EvenlyStyle.brandBlue)
+                // Keep invite banner above every tab so it is not limited to the ledger screen.
+                .safeAreaInset(edge: .top) {
+                    invitationBanner
+                }
             } else if auth.isGuestMode {
                 GuestModeView()
             } else {
@@ -165,19 +174,66 @@ struct ContentView: View {
         .environmentObject(ledgerStore)
         .environmentObject(themeManager)
         .onChange(of: auth.user?.id) { _, userID in
-            guard userID != nil else { return }
-            Task { await notifications.requestAuthorizationAndRegister() }
-            routePendingNotification()
+            if let userID {
+                // Always land on the ledger tab after login / session restore.
+                selectedTab = 0
+                ledgerStore.bind(userId: userID)
+                Task { await notifications.requestAuthorizationAndRegister() }
+                routePendingNotification()
+            } else {
+                ledgerStore.stop()
+            }
         }
         .onChange(of: notifications.pendingDestination) { _, _ in
             routePendingNotification()
         }
+        .onChange(of: notifications.remoteRefreshTick) { _, _ in
+            guard auth.user != nil else { return }
+            // Push arrived while app is open (or background-woken): pull invite banner ASAP.
+            ledgerStore.refreshInvitations()
+            ledgerStore.fetchLedgers()
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, auth.user != nil {
-                ledgerStore.fetchLedgers()
+            if phase == .active, let userID = auth.user?.id {
+                ledgerStore.bind(userId: userID)
+                Task { await notifications.requestAuthorizationAndRegister() }
+            }
+        }
+        .onAppear {
+            if let userID = auth.user?.id {
+                selectedTab = 0
+                ledgerStore.bind(userId: userID)
+                Task { await notifications.requestAuthorizationAndRegister() }
             }
         }
         .preferredColorScheme(themeManager.applyTheme())
+    }
+
+    @ViewBuilder
+    private var invitationBanner: some View {
+        if let invitation = ledgerStore.invitations.first {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("账本邀请").font(.caption).foregroundStyle(.secondary)
+                    Text("\(invitation.invitedByName) 邀请你加入「\(invitation.ledgerName)」")
+                        .font(.subheadline.weight(.semibold))
+                }
+                Spacer()
+                Button("拒绝") {
+                    HapticManager.impact(.rigid, intensity: 0.75)
+                    ledgerStore.respondToInvitation(invitation, accept: false)
+                }
+                .buttonStyle(.bordered)
+                Button("接受") {
+                    HapticManager.impact(.medium, intensity: 0.9)
+                    ledgerStore.respondToInvitation(invitation, accept: true)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(.regularMaterial)
+        }
     }
 
     private func routePendingNotification() {
@@ -193,6 +249,7 @@ struct ContentView: View {
             }
         case .invitations:
             selectedTab = 0
+            ledgerStore.refreshInvitations()
             ledgerStore.fetchLedgers()
             notifications.consumeDestination()
         }
@@ -216,13 +273,10 @@ struct ContentView: View {
         case .addExpense:
             addExpenseSheet
 
-        case .memberManagement(let ledger):
+        case .members(let ledger):
             AddMemberView(ledgerId: ledger.id)
                 .environmentObject(auth)
                 .environmentObject(ledgerStore)
-
-        case .memberList(let ledger):
-            NavigationStack { LedgerMembersView(ledger: ledger) }
 
         case .expenseDetail(let expense, let ledger):
             NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
@@ -298,34 +352,14 @@ struct ContentView: View {
                 } else if let ledger = ledgerStore.currentLedger {
                     ledgerDetailView(ledger)
                 } else {
-                    ContentUnavailableView(
-                        "请选择账本",
-                        systemImage: "book.closed",
-                        description: Text("从左侧选择一个账本")
-                    )
+                    ledgerPickerView
                 }
             }
-            .navigationTitle(ledgerStore.currentLedger?.title ?? "账本")
-            .safeAreaInset(edge: .top) {
-                if let invitation = ledgerStore.invitations.first {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("账本邀请").font(.caption).foregroundStyle(.secondary)
-                            Text("\(invitation.invitedByName) 邀请你加入「\(invitation.ledgerName)」")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        Spacer()
-                        Button("拒绝") { ledgerStore.respondToInvitation(invitation, accept: false) }
-                            .buttonStyle(.bordered)
-                        Button("接受") { ledgerStore.respondToInvitation(invitation, accept: true) }
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial)
-                }
-            }
-            .searchable(text: $searchText, prompt: "搜索账单")
+            .navigationTitle(ledgerStore.currentLedger?.title ?? "选择账本")
+            .searchable(
+                text: $searchText,
+                prompt: ledgerStore.currentLedger == nil ? "搜索账本" : "搜索账单"
+            )
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -337,45 +371,110 @@ struct ContentView: View {
                     .buttonStyle(.spring(.light))
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
+                if ledgerStore.currentLedger != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        // Primary actions live on the overview card (成员 / 添加账单).
+                        // Trailing menu keeps secondary / destructive account-level actions.
+                        Menu {
+                            if let currentLedger = ledgerStore.currentLedger {
+                                Button {
+                                    HapticManager.impact(.light)
+                                    ledgerStore.clearCurrentLedgerSelection()
+                                    searchText = ""
+                                } label: {
+                                    Label("切换账本", systemImage: "arrow.left.arrow.right")
+                                }
+
+                                if let userId = auth.user?.id, currentLedger.ownerId != userId {
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        HapticManager.notificationOccurred(.warning)
+                                        showingLeaveLedgerAlert = true
+                                    } label: {
+                                        Label("退出账本", systemImage: "rectangle.portrait.and.arrow.right")
+                                    }
+                                } else if currentLedger.ownerId == auth.user?.id {
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        HapticManager.notificationOccurred(.warning)
+                                        showingDeleteLedgerAlert = true
+                                    } label: {
+                                        Label("删除账本", systemImage: "trash")
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .accessibilityLabel("更多")
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             HapticManager.impact(.medium)
-                            sheetType = .addExpense
+                            sheetType = .addLedger
                         } label: {
-                            Label("添加账单", systemImage: "plus.circle")
+                            Image(systemName: "plus")
                         }
-
-                        if let currentLedger = ledgerStore.currentLedger,
-                           currentLedger.ownerId == auth.user?.id {
-                            Button {
-                                HapticManager.impact(.medium)
-                                sheetType = .memberManagement(currentLedger)
-                            } label: {
-                                Label("管理成员", systemImage: "person.badge.plus")
-                            }
-                        }
-
-                        if let currentLedger = ledgerStore.currentLedger,
-                           let userId = auth.user?.id,
-                           currentLedger.ownerId != userId {
-                            Divider()
-
-                            Button(role: .destructive) {
-                                HapticManager.notificationOccurred(.warning)
-                                showingLeaveLedgerAlert = true
-                            } label: {
-                                Label("退出账本", systemImage: "rectangle.portrait.and.arrow.right")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                        .buttonStyle(.spring(.light))
+                        .accessibilityLabel("新建账本")
                     }
                 }
             }
         }
         .environmentObject(auth)
         .environmentObject(ledgerStore)
+    }
+
+    /// Explicit pick when the user has multiple ledgers and no last-used selection.
+    private var ledgerPickerView: some View {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let items = query.isEmpty
+            ? ledgerStore.ledgers
+            : ledgerStore.ledgers.filter { $0.title.localizedCaseInsensitiveContains(query) }
+
+        return List {
+            Section {
+                ForEach(items) { ledger in
+                    Button {
+                        HapticManager.impact(.light)
+                        searchText = ""
+                        ledgerStore.setCurrentLedger(ledger)
+                    } label: {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(EvenlyStyle.brandBlue.opacity(0.12))
+                                    .frame(width: 44, height: 44)
+                                Text(String(ledger.title.prefix(1)))
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(EvenlyStyle.brandBlue)
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(ledger.title)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("\(ledger.memberCount) 人 · \(ledger.expenseCount) 笔账单")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                Text("你的账本")
+            } footer: {
+                Text("点选一个账本开始记账。下次会记住你上次打开的账本。")
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 
     private func openLedgerDrawerFromMenuButton() {
@@ -419,12 +518,13 @@ struct ContentView: View {
         ContentUnavailableView {
             Label("暂无账本", systemImage: "book.closed")
         } description: {
-            Text("点击左上角菜单添加第一个账本")
+            Text("创建一个账本，邀请朋友一起分摊开销")
         } actions: {
             Button {
+                HapticManager.impact(.medium)
                 sheetType = .addLedger
             } label: {
-                Text("添加账本")
+                Text("创建第一个账本")
             }
             .buttonStyle(.borderedProminent)
         }
@@ -472,10 +572,14 @@ struct ContentView: View {
             if loadedSettlementLedgerId != ledger.id {
                 loadedSettlementLedgerId = ledger.id
                 loadSettlementData(for: ledger)
+            } else if settlementSuggestions.isEmpty {
+                // Detail may already be on screen from cache; still fill settlements if missing.
+                loadSettlementData(for: ledger)
             }
         }
         .onChange(of: ledger.id) { _, _ in
             loadedSettlementLedgerId = ledger.id
+            settlementSuggestions = []
             loadSettlementData(for: ledger)
         }
     }
@@ -485,7 +589,16 @@ struct ContentView: View {
         let expenses = filteredExpenses(for: ledger)
         Section {
             if ledger.expenses.isEmpty {
-                emptyExpensesPlaceholder
+                if ledgerStore.isLoadingCurrentDetail {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 12)
+                } else {
+                    emptyExpensesPlaceholder
+                }
             } else if expenses.isEmpty {
                 noMatchingExpensesPlaceholder
             } else {
@@ -528,12 +641,14 @@ struct ContentView: View {
                     Divider()
 
                     Button {
+                        HapticManager.impact(.medium, intensity: 0.9)
                         respond(to: expense, with: .confirmed, in: ledger)
                     } label: {
                         Label("确认账单", systemImage: "checkmark.circle")
                     }
 
                     Button(role: .destructive) {
+                        HapticManager.impact(.rigid, intensity: 0.85)
                         respond(to: expense, with: .rejected, in: ledger)
                     } label: {
                         Label("拒绝账单", systemImage: "xmark.circle")
@@ -553,6 +668,7 @@ struct ContentView: View {
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 if canRespond(to: expense) {
                     Button {
+                        HapticManager.impact(.medium, intensity: 0.95)
                         respond(to: expense, with: .confirmed, in: ledger)
                     } label: {
                         Label("确认", systemImage: "checkmark.circle.fill")
@@ -606,7 +722,7 @@ struct ContentView: View {
             Spacer()
             Button {
                 expenseFilter = expenseFilter.next
-                HapticManager.selection.selectionChanged()
+                HapticManager.selectionChanged()
             } label: {
                 HStack(spacing: 4) {
                     Text(expenseFilter.rawValue)
@@ -615,7 +731,7 @@ struct ContentView: View {
                 .font(.caption)
                 .fontWeight(.medium)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.spring(.soft))
             .foregroundStyle(EvenlyStyle.brandBlue)
         }
         .textCase(nil)
@@ -624,11 +740,13 @@ struct ContentView: View {
     @ViewBuilder
     private func mySettlementSection(_ ledger: Ledger) -> some View {
         let mine = mySettlements(in: ledger)
-        if isLoadingSettlementData || settlementError != nil || !mine.isEmpty {
+        // Avoid a full-width spinner when we already have bills/settlements on screen.
+        let showBlockingSpinner = isLoadingSettlementData && mine.isEmpty && ledger.expenses.isEmpty
+        if showBlockingSpinner || settlementError != nil || !mine.isEmpty {
             Section {
-                if isLoadingSettlementData {
+                if showBlockingSpinner {
                     HStack { Spacer(); ProgressView(); Spacer() }
-                } else if let err = settlementError {
+                } else if let err = settlementError, mine.isEmpty {
                     Label(err, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 } else {
@@ -681,7 +799,7 @@ struct ContentView: View {
 
             HStack(spacing: 10) {
                 Button {
-                    sheetType = .memberList(ledger)
+                    sheetType = .members(ledger)
                     HapticManager.impact(.light)
                 } label: {
                     overviewMetric(icon: "person.2.fill", value: "\(ledger.participantCount)", label: "成员")
@@ -777,6 +895,7 @@ struct ContentView: View {
                 HStack {
                     Spacer()
                     Button {
+                        HapticManager.impact(.rigid, intensity: 0.8)
                         respond(to: expense, with: .rejected, in: ledger)
                     } label: {
                         Label("拒绝", systemImage: "xmark.circle")
@@ -785,6 +904,7 @@ struct ContentView: View {
                     .disabled(respondingExpenseIds.contains(expense.id))
 
                     Button {
+                        HapticManager.impact(.medium, intensity: 0.9)
                         respond(to: expense, with: .confirmed, in: ledger)
                     } label: {
                         if respondingExpenseIds.contains(expense.id) {
@@ -862,7 +982,9 @@ struct ContentView: View {
     private func canRespond(to expense: Expense) -> Bool {
         guard expense.status == .pending,
               let userId = auth.user?.id,
+              // Creator and payer do not need to confirm.
               expense.createdBy != userId,
+              expense.payer.userId != userId,
               expense.participants.contains(where: { $0.userId == userId }) else {
             return false
         }
@@ -890,15 +1012,23 @@ struct ContentView: View {
     }
 
     private func loadSettlementData(for ledger: Ledger) {
-        isLoadingSettlementData = true
+        // Stale-while-revalidate: only block the UI when there is nothing to show yet.
+        let needsBlockingLoad = settlementSuggestions.isEmpty && ledger.expenses.isEmpty
+        if needsBlockingLoad {
+            isLoadingSettlementData = true
+        }
         settlementError = nil
-        ledgerStore.fetchOverview(for: ledger) { result in
+        ledgerStore.fetchOverview(for: ledger, force: false) { result in
             isLoadingSettlementData = false
             switch result {
             case .success(let overview):
                 settlementSuggestions = overview.settlementSuggestions.map { Settlement(from: $0) }
             case .failure(let error):
-                settlementError = error.localizedDescription
+                // Cancelled/debounced soft refresh is not a user-facing error.
+                if (error as? URLError)?.code == .cancelled { return }
+                if needsBlockingLoad {
+                    settlementError = error.localizedDescription
+                }
             }
         }
     }
@@ -961,6 +1091,17 @@ struct ContentView: View {
             case .failure(let error):
                 HapticManager.notificationOccurred(.error)
                 actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteCurrentLedger(_ ledger: Ledger) {
+        ledgerStore.deleteLedger(ledger) { error in
+            if let error {
+                HapticManager.notificationOccurred(.error)
+                actionError = error.localizedDescription
+            } else {
+                HapticManager.notificationOccurred(.success)
             }
         }
     }

@@ -6,17 +6,30 @@ struct LedgerMembersView: View {
     var body: some View {
         List(ledger.participants.filter { !$0.isRemoved }) { participant in
             HStack(spacing: 12) {
-                RemoteAvatarView(
-                    avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
-                    fallbackText: participant.name,
-                    size: 42
-                )
-                .opacity(participant.isPending ? 0.55 : 1.0)
+                ZStack(alignment: .topTrailing) {
+                    RemoteAvatarView(
+                        avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
+                        fallbackText: participant.name,
+                        size: 42
+                    )
+                    .opacity((participant.isPending || participant.isRejected) ? 0.55 : 1.0)
+
+                    if participant.userId == ledger.ownerId {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.orange)
+                            .padding(3)
+                            .background(Circle().fill(Color(.systemBackground)))
+                            .overlay(Circle().stroke(Color.orange.opacity(0.35), lineWidth: 0.8))
+                            .offset(x: 4, y: -4)
+                            .accessibilityLabel("账本创建者")
+                    }
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(participant.name)
                             .font(.body)
-                            .foregroundStyle(participant.isPending ? .secondary : .primary)
+                            .foregroundStyle((participant.isPending || participant.isRejected) ? .secondary : .primary)
                         if participant.isPending {
                             Text("邀请中")
                                 .font(.caption2)
@@ -25,6 +38,14 @@ struct LedgerMembersView: View {
                                 .padding(.vertical, 2)
                                 .background(Color.secondary.opacity(0.12))
                                 .clipShape(Capsule())
+                        } else if participant.isRejected {
+                            Text("已拒绝")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.red.opacity(0.12))
+                                .clipShape(Capsule())
                         }
                     }
                     Text(roleText(for: participant))
@@ -32,10 +53,6 @@ struct LedgerMembersView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if participant.userId == ledger.ownerId {
-                    Image(systemName: "crown.fill")
-                        .foregroundStyle(.orange)
-                }
             }
             .padding(.vertical, 3)
         }
@@ -53,6 +70,7 @@ struct LedgerMembersView: View {
     private func roleText(for participant: Person) -> String {
         if participant.userId == ledger.ownerId { return "账本创建者" }
         if participant.isPending { return "等待对方接受邀请" }
+        if participant.isRejected { return "对方已拒绝邀请" }
         return participant.isTemporary ? "临时成员" : "成员"
     }
 }

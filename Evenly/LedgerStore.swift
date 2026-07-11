@@ -12,6 +12,8 @@ final class LedgerStore: ObservableObject {
     @Published private(set) var ledgers: [Ledger] = []
     @Published var currentLedger: Ledger?
     @Published private(set) var isLoading = false
+    /// True while the active ledger's overview (expenses/members/settlements) is loading.
+    @Published private(set) var isLoadingCurrentDetail = false
     @Published var error: String?
     @Published private(set) var invitations: [LedgerInvitationResponse] = []
 
@@ -19,35 +21,47 @@ final class LedgerStore: ObservableObject {
     private var userId: String?
     private var pollingTimer: Timer?
     private let userDefaultsKey = "CurrentLedgerId"
+    private var overviewInFlight: Set<UUID> = []
+    private var lastOverviewFetchedAt: [UUID: Date] = [:]
+    private var lastOverviewResponses: [UUID: LedgerOverviewResponse] = [:]
+
+    /// Lightweight invitation poll interval while the app is foregrounded.
+    /// Invites must surface without relaunch even when remote push is unavailable.
+    private static let invitationPollInterval: TimeInterval = 5
+    /// Soft-refresh debounce so scene-phase / onAppear / list reload don't triple-fetch.
+    private static let overviewMinRefreshInterval: TimeInterval = 2.5
 
     // MARK: - Bind User
 
     func bind(userId: String) {
-        // If same user already bound, skip
-        if self.userId == userId && !ledgers.isEmpty {
-            print("LedgerStore.bind: Same user, skipping bind")
-            return
-        }
-
-        // If different user, clear first
-        if self.userId != userId {
+        let switchedUser = self.userId != userId
+        if switchedUser {
             stop()
-            self.userId = userId
+        }
+        self.userId = userId
+
+        print("=== LedgerStore.bind userId=\(userId) ===")
+
+        // Paint from local cache immediately so the bill list isn't blank on cold start.
+        if switchedUser || ledgers.isEmpty {
+            restoreCachedLedgersIfNeeded()
         }
 
-        print("=== LedgerStore.bind ===")
-        print("userId: \(userId)")
-
-        // Start polling for ledgers
+        // Always pull invites immediately — don't wait for the ledger list or the
+        // first poll tick, otherwise a live invite never appears until relaunch.
+        refreshInvitations()
+        startInvitationPolling()
         fetchLedgers()
-
-        // Keep data stable while users are editing forms. Mutations refresh their own data.
-        startPolling()
     }
 
-    private func startPolling() {
+    private func startInvitationPolling() {
         pollingTimer?.invalidate()
-        pollingTimer = nil
+        // Schedule on the main run loop in common modes so scrolling doesn't pause polls.
+        let timer = Timer(timeInterval: Self.invitationPollInterval, repeats: true) { [weak self] _ in
+            self?.refreshInvitations()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollingTimer = timer
     }
 
     func stop() {
@@ -56,6 +70,11 @@ final class LedgerStore: ObservableObject {
         ledgers = []
         currentLedger = nil
         invitations = []
+        isLoadingCurrentDetail = false
+        overviewInFlight.removeAll()
+        lastOverviewFetchedAt.removeAll()
+        lastOverviewResponses.removeAll()
+        userId = nil
     }
 
     // MARK: - Fetch Ledgers
@@ -67,37 +86,79 @@ final class LedgerStore: ObservableObject {
             do {
                 let responses: [LedgerResponse] = try await api.get(APIEndpoints.ledgers)
 
-                await MainActor.run {
-                    self.ledgers = responses.map { Ledger(from: $0) }.sorted { $0.title < $1.title }
+                let selectedId = await MainActor.run { () -> UUID? in
+                    let previousById = Dictionary(uniqueKeysWithValues: self.ledgers.map { ($0.id, $0) })
 
-                    // List responses contain counts, but not member records. Always
-                    // hydrate the full ledger so member views and expense forms have
-                    // real participants after login or accepting an invitation.
-                    for response in responses {
-                        if let ledgerId = UUID(uuidString: response.id) {
-                            self.hydrateLedger(ledgerId: ledgerId)
+                    // Keep previously loaded expenses/members while refreshing the shell list
+                    // so the UI does not flash empty → filled on every foreground.
+                    self.ledgers = responses.map { response in
+                        var ledger = Ledger(from: response)
+                        if let previous = UUID(uuidString: response.id).flatMap({ previousById[$0] }) {
+                            if !previous.expenses.isEmpty {
+                                ledger.expenses = previous.expenses
+                                ledger.expenseCount = previous.expenses.count
+                            }
+                            if !previous.participants.isEmpty {
+                                ledger.participants = previous.participants
+                                ledger.members = previous.members
+                                ledger.memberIds = previous.memberIds
+                                ledger.memberCount = previous.participants.filter(\.isActive).count
+                            }
                         }
+                        return ledger
                     }
+                    .sorted { $0.title < $1.title }
 
-                    let selectedId = self.currentLedger?.id
-                        ?? UserDefaults.standard.string(forKey: self.userDefaultsKey).flatMap(UUID.init(uuidString:))
-                        ?? self.ledgers.first?.id
+                    // Prefer last-used / current; only auto-enter when there is exactly one ledger.
+                    // Multiple ledgers with no memory → leave selection empty so UI shows a picker.
+                    let preferred = self.resolvePreferredLedger(from: self.ledgers, keeping: self.currentLedger?.id)
 
-                    if let selectedId,
-                       let ledger = self.ledgers.first(where: { $0.id == selectedId }) {
-                        self.currentLedger = ledger
-                        UserDefaults.standard.set(ledger.id.uuidString, forKey: self.userDefaultsKey)
+                    if let preferred {
+                        let selectedId = preferred.id
+                        if self.currentLedger?.id == selectedId, !(self.currentLedger?.expenses.isEmpty ?? true) {
+                            var merged = preferred
+                            merged.expenses = self.currentLedger?.expenses ?? preferred.expenses
+                            merged.participants = self.currentLedger?.participants ?? preferred.participants
+                            merged.members = self.currentLedger?.members ?? preferred.members
+                            merged.memberIds = self.currentLedger?.memberIds ?? preferred.memberIds
+                            merged.memberCount = merged.participants.filter(\.isActive).count
+                            merged.expenseCount = merged.expenses.count
+                            self.currentLedger = merged
+                            if let idx = self.ledgers.firstIndex(where: { $0.id == selectedId }) {
+                                self.ledgers[idx] = merged
+                            }
+                        } else {
+                            self.currentLedger = preferred
+                        }
+                        UserDefaults.standard.set(preferred.id.uuidString, forKey: self.userDefaultsKey)
+                        self.persistLedgersCache()
+                        return selectedId
                     } else {
                         self.currentLedger = nil
+                        self.persistLedgersCache()
+                        return nil
                     }
                 }
-                await fetchInvitationsWithoutBlockingLedgers()
+
+                // One overview call for the active ledger replaces N×(detail+expenses) hydrations.
+                if let selectedId {
+                    _ = try? await self.loadOverview(ledgerId: selectedId, force: false)
+                }
             } catch {
                 await MainActor.run {
                     self.error = error.localizedDescription
                 }
             }
+            // Always refresh invites independently so a ledger-list failure cannot
+            // hide pending invitations.
+            await fetchInvitationsWithoutBlockingLedgers()
         }
+    }
+
+    /// Public refresh used by scene-phase, push callbacks, and polling.
+    func refreshInvitations() {
+        guard userId != nil else { return }
+        Task { await fetchInvitationsWithoutBlockingLedgers() }
     }
 
     private func fetchInvitationsWithoutBlockingLedgers() async {
@@ -127,105 +188,25 @@ final class LedgerStore: ObservableObject {
         }
     }
 
-    private func fetchAllLedgerDetails() {
-        for (index, ledger) in ledgers.enumerated() {
-            Task {
-                do {
-                    let response: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledger.id.uuidString))
-
-                    await MainActor.run {
-                        let updatedLedger = Ledger(from: response)
-                        self.ledgers[index] = updatedLedger
-
-                        // Update current ledger if it matches
-                        if self.currentLedger?.id == updatedLedger.id {
-                            self.currentLedger = updatedLedger
-                        }
-                    }
-                } catch {
-                    print("Failed to fetch ledger details: \(error)")
-                }
-            }
-        }
-    }
-
-    private func hydrateLedger(ledgerId: UUID) {
-        Task {
-            do {
-                let detail: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledgerId.uuidString))
-                let expenses: [ExpenseWithDetails] = try await api.get(APIEndpoints.expenses(ledgerId: ledgerId.uuidString))
-                var hydrated = Ledger(from: detail)
-                hydrated.expenses = expenses.map {
-                    Expense(from: $0, participants: hydrated.participants)
-                }
-                hydrated.expenseCount = hydrated.expenses.count
-
-                await MainActor.run {
-                    guard let index = self.ledgers.firstIndex(where: { $0.id == ledgerId }) else { return }
-                    self.ledgers[index] = hydrated
-                    if self.currentLedger?.id == ledgerId {
-                        self.currentLedger = hydrated
-                    }
-                }
-            } catch {
-                print("Failed to hydrate ledger \(ledgerId): \(error)")
-            }
-        }
-    }
-
     func fetchLedgerDetails(ledgerId: UUID) {
-        Task {
-            do {
-                let response: LedgerWithMembers = try await api.get(APIEndpoints.ledger(id: ledgerId.uuidString))
-                let updatedLedger = Ledger(from: response)
-
-                await MainActor.run {
-                    if let index = self.ledgers.firstIndex(where: { $0.id == ledgerId }) {
-                        var merged = updatedLedger
-                        if self.currentLedger?.id == ledgerId {
-                            merged.expenses = self.currentLedger?.expenses ?? []
-                        } else {
-                            merged.expenses = self.ledgers[index].expenses
-                        }
-                        merged.memberCount = merged.participants.filter(\.isActive).count
-                        merged.expenseCount = self.ledgers[index].expenseCount
-                        self.ledgers[index] = merged
-                        self.currentLedger = merged
-                        self.fetchExpenses(for: merged)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error.localizedDescription
-                }
-            }
-        }
+        // Prefer the combined overview endpoint (members + expenses + settlements).
+        Task { _ = try? await loadOverview(ledgerId: ledgerId, force: true) }
     }
 
     func fetchOverview(
         for ledger: Ledger,
+        force: Bool = false,
         completion: @escaping (Result<LedgerOverviewResponse, Error>) -> Void
     ) {
         Task {
             do {
-                let response: LedgerOverviewResponse = try await api.get(
-                    APIEndpoints.ledgerOverview(id: ledger.id.uuidString)
-                )
-                var updatedLedger = Ledger(from: response.ledger)
-                updatedLedger.expenses = response.expenses.map {
-                    Expense(from: $0, participants: updatedLedger.participants)
-                }
-                updatedLedger.memberCount = updatedLedger.participants.filter(\.isActive).count
-                updatedLedger.expenseCount = updatedLedger.expenses.count
-
-                await MainActor.run {
-                    if let index = self.ledgers.firstIndex(where: { $0.id == updatedLedger.id }) {
-                        self.ledgers[index] = updatedLedger
-                    }
-                    if self.currentLedger?.id == updatedLedger.id {
-                        self.currentLedger = updatedLedger
-                    }
-                    completion(.success(response))
+                if let response = try await loadOverview(ledgerId: ledger.id, force: force) {
+                    await MainActor.run { completion(.success(response)) }
+                } else if let cached = lastOverviewResponses[ledger.id] {
+                    // Soft-skipped but we still have a recent overview for settlements UI.
+                    await MainActor.run { completion(.success(cached)) }
+                } else {
+                    await MainActor.run { completion(.failure(URLError(.cancelled))) }
                 }
             } catch {
                 await MainActor.run {
@@ -234,6 +215,83 @@ final class LedgerStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Loads ledger + members + expenses + settlements in a single request.
+    /// Returns `nil` when a soft refresh is debounced or already in flight (caller may use cache).
+    @discardableResult
+    private func loadOverview(ledgerId: UUID, force: Bool) async throws -> LedgerOverviewResponse? {
+        let (alreadyInFlight, hasLocalDetail, recentlyFetched) = await MainActor.run { () -> (Bool, Bool, Bool) in
+            let inFlight = self.overviewInFlight.contains(ledgerId)
+            let hasDetail = (self.currentLedger?.id == ledgerId && !(self.currentLedger?.expenses.isEmpty ?? true))
+                || (self.ledgers.first(where: { $0.id == ledgerId })?.expenses.isEmpty == false)
+            let recent: Bool
+            if let last = self.lastOverviewFetchedAt[ledgerId] {
+                recent = Date().timeIntervalSince(last) < Self.overviewMinRefreshInterval
+            } else {
+                recent = false
+            }
+            return (inFlight, hasDetail, recent)
+        }
+
+        if alreadyInFlight {
+            // Wait briefly for the in-flight request so settlements can reuse its result.
+            for _ in 0..<20 {
+                try await Task.sleep(nanoseconds: 100_000_000)
+                let done = await MainActor.run { !self.overviewInFlight.contains(ledgerId) }
+                if done {
+                    return lastOverviewResponses[ledgerId]
+                }
+            }
+            return lastOverviewResponses[ledgerId]
+        }
+        if !force, recentlyFetched, hasLocalDetail {
+            return lastOverviewResponses[ledgerId]
+        }
+
+        await MainActor.run {
+            self.overviewInFlight.insert(ledgerId)
+            // Only show the detail spinner when there is nothing useful on screen yet.
+            if !hasLocalDetail {
+                self.isLoadingCurrentDetail = true
+            }
+        }
+
+        defer {
+            Task { @MainActor in
+                self.overviewInFlight.remove(ledgerId)
+                if self.overviewInFlight.isEmpty {
+                    self.isLoadingCurrentDetail = false
+                }
+            }
+        }
+
+        let response: LedgerOverviewResponse = try await api.get(
+            APIEndpoints.ledgerOverview(id: ledgerId.uuidString)
+        )
+        var updatedLedger = Ledger(from: response.ledger)
+        updatedLedger.expenses = response.expenses.map {
+            Expense(from: $0, participants: updatedLedger.participants)
+        }
+        updatedLedger.memberCount = updatedLedger.participants.filter(\.isActive).count
+        updatedLedger.expenseCount = updatedLedger.expenses.count
+
+        await MainActor.run {
+            if let index = self.ledgers.firstIndex(where: { $0.id == updatedLedger.id }) {
+                self.ledgers[index] = updatedLedger
+            } else {
+                self.ledgers.append(updatedLedger)
+                self.ledgers.sort { $0.title < $1.title }
+            }
+            if self.currentLedger?.id == updatedLedger.id || self.currentLedger == nil {
+                self.currentLedger = updatedLedger
+                UserDefaults.standard.set(updatedLedger.id.uuidString, forKey: self.userDefaultsKey)
+            }
+            self.lastOverviewFetchedAt[ledgerId] = Date()
+            self.lastOverviewResponses[ledgerId] = response
+            self.persistLedgersCache()
+        }
+        return response
     }
 
     // MARK: - Current Ledger
@@ -245,6 +303,43 @@ final class LedgerStore: ObservableObject {
     func setCurrentLedger(_ ledger: Ledger) {
         currentLedger = ledger
         UserDefaults.standard.set(ledger.id.uuidString, forKey: userDefaultsKey)
+        // Load detail for the newly selected ledger (single overview request).
+        Task { _ = try? await loadOverview(ledgerId: ledger.id, force: ledger.expenses.isEmpty) }
+    }
+
+    func clearCurrentLedgerSelection() {
+        currentLedger = nil
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+    }
+
+    /// Selection policy for landing:
+    /// 1) keep the in-memory current ledger if it still exists
+    /// 2) restore last-used id from disk if still a member
+    /// 3) auto-open only when there is exactly one ledger
+    /// 4) otherwise require an explicit pick (return nil)
+    private func resolvePreferredLedger(from ledgers: [Ledger], keeping currentId: UUID?) -> Ledger? {
+        if let currentId, let match = ledgers.first(where: { $0.id == currentId }) {
+            return match
+        }
+        if let saved = UserDefaults.standard.string(forKey: userDefaultsKey).flatMap(UUID.init(uuidString:)),
+           let match = ledgers.first(where: { $0.id == saved }) {
+            return match
+        }
+        if ledgers.count == 1 {
+            return ledgers[0]
+        }
+        return nil
+    }
+
+    private func restoreCachedLedgersIfNeeded() {
+        let cached = DataPersistence.loadLedgers()
+        guard !cached.isEmpty else { return }
+        ledgers = cached.sorted { $0.title < $1.title }
+        currentLedger = resolvePreferredLedger(from: ledgers, keeping: currentLedger?.id)
+    }
+
+    private func persistLedgersCache() {
+        DataPersistence.saveLedgers(ledgers)
     }
 
     func applyUpdatedLedger(_ ledger: Ledger) {
@@ -518,7 +613,10 @@ final class LedgerStore: ObservableObject {
                 let request = expense.toCreateRequest(payerId: payerId, ledgerId: ledger.id)
                 let response: ExpenseResponse = try await api.post(APIEndpoints.expenses(ledgerId: ledger.id.uuidString), body: request)
 
-                let newExpense = Expense(from: response, participants: expense.participants)
+                var newExpense = Expense(from: response, participants: expense.participants)
+                // Prefer server values; keep local category/icon if an older API omits them.
+                if newExpense.icon == nil { newExpense.icon = expense.icon }
+                if newExpense.category == nil { newExpense.category = expense.category }
 
                 await MainActor.run {
                     if var updatedLedger = self.currentLedger {

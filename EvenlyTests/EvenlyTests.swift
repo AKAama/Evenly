@@ -31,6 +31,24 @@ final class EvenlyTests: XCTestCase {
         )
     }
 
+    func testContentViewSurfacesInvitationBannerGlobally() throws {
+        let source = try sourceFile(named: "ContentView.swift")
+
+        XCTAssertTrue(source.contains("invitationBanner"))
+        XCTAssertTrue(source.contains("ledgerStore.bind(userId: userID)"))
+        // Banner must not live only inside the ledger tab NavigationStack.
+        XCTAssertFalse(source.contains(".safeAreaInset(edge: .top) {\n                if let invitation = ledgerStore.invitations.first"))
+    }
+
+    func testLedgerStorePollsInvitationsWhileForegrounded() throws {
+        let source = try sourceFile(named: "LedgerStore.swift")
+
+        XCTAssertTrue(source.contains("startInvitationPolling"))
+        XCTAssertTrue(source.contains("refreshInvitations()"))
+        // Must not re-announce via local notifications — that doubles APNs banners.
+        XCTAssertFalse(source.contains("announceNewInvitations"))
+    }
+
     func testLedgerDrawerOmitsAccountHeader() throws {
         let source = try sourceFile(named: "LedgerDrawerView.swift")
 

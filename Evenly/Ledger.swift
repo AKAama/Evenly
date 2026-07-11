@@ -14,13 +14,15 @@ struct Person: Identifiable, Codable, Hashable {
     var userId: String?
     var avatarUrl: String?
     var isTemporary: Bool
-    /// Membership status: "active" (joined) or "pending" (invited but not yet accepted)
+    /// Membership status: active / pending / rejected / removed
     var status: String
 
     /// True if the person has accepted the invitation and is an active member
     var isActive: Bool { status == "active" }
     /// True if the person has been invited but not yet accepted
     var isPending: Bool { status == "pending" }
+    /// True if the person declined the invitation (row retained for re-invite).
+    var isRejected: Bool { status == "rejected" }
     /// Removed members remain available for rendering historical expenses.
     var isRemoved: Bool { status == "removed" }
 

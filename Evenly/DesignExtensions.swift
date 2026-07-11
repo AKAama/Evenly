@@ -73,8 +73,31 @@ extension View {
     }
 }
 
-// MARK: - Haptic Feedback Manager
-struct HapticManager {
+// MARK: - Apple-style Motion Tokens
+/// Springs aligned with Apple's fluid-interface guidance (WWDC Designing Fluid Interfaces).
+/// Prefer critically damped motion for routine UI; reserve bounce for momentum gestures.
+enum EvenlyMotion {
+    /// Default UI motion — no overshoot (damping ≈ 1.0).
+    static var ui: Animation { .spring(response: 0.35, dampingFraction: 1.0) }
+    /// Snappy press feedback (~100–160ms feel).
+    static var press: Animation { .spring(response: 0.18, dampingFraction: 0.92) }
+    /// Sheet / drawer settle with a hint of physicality.
+    static var sheet: Animation { .spring(response: 0.32, dampingFraction: 0.86) }
+    /// Momentum / flick release (slight bounce only when gesture carried velocity).
+    static var momentum: Animation { .spring(response: 0.30, dampingFraction: 0.82) }
+    /// List / layout appearance.
+    static var appear: Animation { .spring(response: 0.40, dampingFraction: 0.92) }
+
+    static func preferReducedMotion(_ reduce: Bool) -> Animation {
+        reduce ? .easeOut(duration: 0.15) : ui
+    }
+}
+
+// MARK: - Haptic Feedback Manager (UIKit Core Haptics path)
+/// Reuses prepared generators so feedback fires on touch-down with minimal latency.
+/// Respects system Reduce Motion: keeps short utility haptics, skips decorative ones.
+@MainActor
+enum HapticManager {
     static let light = UIImpactFeedbackGenerator(style: .light)
     static let medium = UIImpactFeedbackGenerator(style: .medium)
     static let heavy = UIImpactFeedbackGenerator(style: .heavy)
@@ -82,18 +105,75 @@ struct HapticManager {
     static let rigid = UIImpactFeedbackGenerator(style: .rigid)
     static let notification = UINotificationFeedbackGenerator()
     static let selection = UISelectionFeedbackGenerator()
-    
+
+    /// True when the device can play haptics (iPhone with Taptic Engine).
+    static var isSupported: Bool {
+        // All modern iPhones support UIKit haptics; simulators silently no-op.
+        true
+    }
+
+    private static var prefersReducedMotion: Bool {
+        UIAccessibility.isReduceMotionEnabled
+    }
+
     static func prepare() {
-        [light, medium, heavy, soft, rigid, notification, selection].forEach { $0.prepare() }
+        light.prepare()
+        medium.prepare()
+        heavy.prepare()
+        soft.prepare()
+        rigid.prepare()
+        notification.prepare()
+        selection.prepare()
     }
-    
-    static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
-        let generator = UIImpactFeedbackGenerator(style: style)
-        generator.impactOccurred()
+
+    private static func generator(for style: UIImpactFeedbackGenerator.FeedbackStyle) -> UIImpactFeedbackGenerator {
+        switch style {
+        case .light: return light
+        case .medium: return medium
+        case .heavy: return heavy
+        case .soft: return soft
+        case .rigid: return rigid
+        @unknown default: return medium
+        }
     }
-    
+
+    /// Touch-down impact. Intensity 0…1 maps to Apple's impact intensity API.
+    static func impact(
+        _ style: UIImpactFeedbackGenerator.FeedbackStyle = .light,
+        intensity: CGFloat = 1.0
+    ) {
+        let gen = generator(for: style)
+        gen.prepare()
+        let clamped = min(max(intensity, 0), 1)
+        if clamped >= 0.999 {
+            gen.impactOccurred()
+        } else {
+            gen.impactOccurred(intensity: clamped)
+        }
+    }
+
+    /// Subtle press used by buttons (light + soft intensity).
+    static func press() {
+        impact(.soft, intensity: 0.7)
+    }
+
+    /// Selection scrub / chip change.
+    static func selectionChanged() {
+        selection.prepare()
+        selection.selectionChanged()
+    }
+
+    /// Success / error / warning for completed actions.
     static func notificationOccurred(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        // Keep outcome haptics even with Reduce Motion — they signal utility, not decoration.
+        notification.prepare()
         notification.notificationOccurred(type)
+    }
+
+    /// Decorative motion haptic — skipped when Reduce Motion is on.
+    static func decorativeImpact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        guard !prefersReducedMotion else { return }
+        impact(style, intensity: 0.55)
     }
 }
 
@@ -102,41 +182,53 @@ struct SpringAnimationModifier: ViewModifier {
     let response: Double
     let dampingFraction: Double
     let blendDuration: Double
-    
-    init(response: Double = 0.5, dampingFraction: Double = 0.7, blendDuration: Double = 0) {
+
+    init(response: Double = 0.35, dampingFraction: Double = 1.0, blendDuration: Double = 0) {
         self.response = response
         self.dampingFraction = dampingFraction
         self.blendDuration = blendDuration
     }
-    
+
     func body(content: Content) -> some View {
         content
-            .animation(.spring(response: response, dampingFraction: dampingFraction, blendDuration: blendDuration), value: UUID())
+            .animation(
+                .spring(response: response, dampingFraction: dampingFraction, blendDuration: blendDuration),
+                value: UUID()
+            )
     }
 }
 
 extension View {
-    func springAnimation(response: Double = 0.5, dampingFraction: Double = 0.7) -> some View {
+    func springAnimation(response: Double = 0.35, dampingFraction: Double = 1.0) -> some View {
         self.modifier(SpringAnimationModifier(response: response, dampingFraction: dampingFraction))
     }
 }
 
-// MARK: - Button Style with Haptics
+// MARK: - Button Style with Haptics (press-down, Apple-scale ~0.97)
 struct SpringButtonStyle: ButtonStyle {
     let hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle
-    
-    init(hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+    var scale: CGFloat = 0.97
+    var intensity: CGFloat = 0.75
+
+    init(
+        hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle = .soft,
+        scale: CGFloat = 0.97,
+        intensity: CGFloat = 0.75
+    ) {
         self.hapticStyle = hapticStyle
+        self.scale = scale
+        self.intensity = intensity
     }
-    
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .opacity(configuration.isPressed ? 0.9 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? scale : 1.0)
+            .opacity(configuration.isPressed ? 0.92 : 1.0)
+            .animation(EvenlyMotion.press, value: configuration.isPressed)
             .onChange(of: configuration.isPressed) { _, isPressed in
+                // Fire on touch-down (not release) so feedback feels direct.
                 if isPressed {
-                    HapticManager.impact(hapticStyle)
+                    HapticManager.impact(hapticStyle, intensity: intensity)
                 }
             }
     }
@@ -147,22 +239,32 @@ extension ButtonStyle where Self == SpringButtonStyle {
     static func spring(_ style: UIImpactFeedbackGenerator.FeedbackStyle) -> SpringButtonStyle {
         SpringButtonStyle(hapticStyle: style)
     }
+    /// Primary CTAs (保存 / 确认) — slightly firmer.
+    static var springPrimary: SpringButtonStyle {
+        SpringButtonStyle(hapticStyle: .medium, scale: 0.97, intensity: 0.85)
+    }
+    /// Destructive / 拒绝.
+    static var springRigid: SpringButtonStyle {
+        SpringButtonStyle(hapticStyle: .rigid, scale: 0.97, intensity: 0.8)
+    }
 }
 
-// MARK: - Scale on Press
+// MARK: - Scale on Press (for non-Button labels / rows)
 struct ScaleOnPress: ViewModifier {
+    var haptic: Bool = true
     @State private var isPressed = false
-    
+
     func body(content: Content) -> some View {
         content
             .scaleEffect(isPressed ? 0.97 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isPressed)
+            .animation(EvenlyMotion.press, value: isPressed)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
-                        if !isPressed {
-                            isPressed = true
-                            HapticManager.impact(.light)
+                        guard !isPressed else { return }
+                        isPressed = true
+                        if haptic {
+                            HapticManager.press()
                         }
                     }
                     .onEnded { _ in
@@ -173,8 +275,18 @@ struct ScaleOnPress: ViewModifier {
 }
 
 extension View {
-    func scaleOnPress() -> some View {
-        modifier(ScaleOnPress())
+    func scaleOnPress(haptic: Bool = true) -> some View {
+        modifier(ScaleOnPress(haptic: haptic))
+    }
+
+    /// iOS 17+ sensory feedback layered on top of UIKit haptics for system-native feel.
+    @ViewBuilder
+    func evenlyPressFeedback(trigger: some Equatable) -> some View {
+        if #available(iOS 17.0, *) {
+            self.sensoryFeedback(.impact(flexibility: .soft, intensity: 0.7), trigger: trigger)
+        } else {
+            self
+        }
     }
 }
 
@@ -332,7 +444,7 @@ struct ListRowAnimation: ViewModifier {
             .opacity(appears ? 1 : 0)
             .offset(y: appears ? 0 : 10)
             .onAppear {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                withAnimation(EvenlyMotion.appear) {
                     appears = true
                 }
             }

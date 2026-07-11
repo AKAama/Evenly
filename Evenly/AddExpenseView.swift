@@ -157,10 +157,8 @@ struct AddExpenseView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     headerCard
-
                     presetCard
                     peopleSummaryCard
-
                     if let errorMessage {
                         errorCard(errorMessage)
                     }
@@ -169,6 +167,7 @@ struct AddExpenseView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 32)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background {
                 ZStack(alignment: .top) {
                     Color(.systemGroupedBackground)
@@ -177,11 +176,10 @@ struct AddExpenseView: View {
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                        .frame(height: 300)
+                    .frame(height: 300)
                 }
                 .ignoresSafeArea()
             }
-            .scrollDismissesKeyboard(.interactively)
             .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selectedParticipantIds.count)
             .navigationTitle(existingId == nil ? "新建账单" : "编辑账单")
             .navigationBarTitleDisplayMode(.inline)
@@ -203,7 +201,7 @@ struct AddExpenseView: View {
                         }
                     }
                 ))
-                    .presentationDetents([.medium, .large])
+                .presentationDetents([.medium, .large])
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -272,11 +270,11 @@ struct AddExpenseView: View {
                         expenseIconView(selectedIcon, size: 14)
                         Text(selectedCategory ?? selectedPreset?.name ?? "自定义")
                     }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(primaryBlue)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(primaryBlue.opacity(colorScheme == .dark ? 0.18 : 0.1), in: Capsule())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(primaryBlue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(primaryBlue.opacity(colorScheme == .dark ? 0.18 : 0.1), in: Capsule())
                 }
             }
 
@@ -1317,7 +1315,7 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
 
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {   
             throw NSError(
                 domain: "VoiceExpense",
                 code: 2,

@@ -29,6 +29,9 @@ enum APIEndpoints {
     static let sendEmailChange = "/users/me/email/send-verification"
     static let changeEmail = "/users/me/email"
     static let deleteAccount = "/users/me"
+    static func pushDevice(token: String) -> String {
+        "/users/me/push-devices/\(token)"
+    }
     static func searchUsers(q: String, limit: Int = 20) -> String {
         "/users/search?q=\(q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q)&limit=\(limit)"
     }

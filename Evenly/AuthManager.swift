@@ -530,13 +530,18 @@ class AuthManager: ObservableObject {
     // MARK: - Logout
 
     func signOut() {
-        api.clearToken()
-        self.user = nil
-        self.userProfile = nil
-        self.avatarImage = nil
-        self.isGuestMode = false
-        self.authMethods = []
-        self.hasPassword = true
+        Task {
+            await NotificationManager.shared.unregisterCurrentDevice()
+            await MainActor.run {
+                api.clearToken()
+                self.user = nil
+                self.userProfile = nil
+                self.avatarImage = nil
+                self.isGuestMode = false
+                self.authMethods = []
+                self.hasPassword = true
+            }
+        }
     }
 
     func enterGuestMode() {

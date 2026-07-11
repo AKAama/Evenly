@@ -8,6 +8,29 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual("Evenly", "Evenly")
     }
 
+    func testAPNsTokenUsesLowercaseHexadecimalEncoding() {
+        XCTAssertEqual(NotificationManager.hexToken(Data([0x00, 0x0f, 0xa5, 0xff])), "000fa5ff")
+    }
+
+    func testExpenseNotificationParsesLedgerDestination() {
+        let destination = NotificationDestination(userInfo: [
+            "event": "expense.created",
+            "ledger_id": "11111111-1111-1111-1111-111111111111",
+            "expense_id": "22222222-2222-2222-2222-222222222222"
+        ])
+        XCTAssertEqual(destination, .ledger(UUID(uuidString: "11111111-1111-1111-1111-111111111111")!))
+    }
+
+    func testInvitationNotificationParsesInvitationDestination() {
+        XCTAssertEqual(
+            NotificationDestination(userInfo: [
+                "event": "ledger.invited",
+                "ledger_id": "11111111-1111-1111-1111-111111111111"
+            ]),
+            .invitations
+        )
+    }
+
     func testLedgerDrawerOmitsAccountHeader() throws {
         let source = try sourceFile(named: "LedgerDrawerView.swift")
 

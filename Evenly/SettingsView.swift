@@ -6,10 +6,12 @@
 
 import SwiftUI
 import PhotosUI
+import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthManager
     @EnvironmentObject var themeManager: ThemeManager
+    @StateObject private var notifications = NotificationManager.shared
 
     private var versionLabel: String {
         let version = Bundle.main.object(
@@ -82,6 +84,20 @@ struct SettingsView: View {
                     Text("选择您喜欢的界面主题")
                 }
 
+                Section("通知") {
+                    HStack {
+                        Label("系统通知", systemImage: "bell.badge")
+                        Spacer()
+                        Text(notificationStatusLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                    if notifications.authorizationStatus == .denied {
+                        Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
+                            Label("前往系统设置", systemImage: "gear")
+                        }
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         DataManagementView()
@@ -127,6 +143,15 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("设置")
+        }
+    }
+
+    private var notificationStatusLabel: String {
+        switch notifications.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: "已开启"
+        case .denied: "已关闭"
+        case .notDetermined: "未设置"
+        @unknown default: "未知"
         }
     }
 }

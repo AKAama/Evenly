@@ -70,8 +70,10 @@
 4. **支出筛选**
    - 按确认状态筛选支出（全部/已确认/待确认/已否决）
 
-5. **推送通知**
-   - 当有新支出时推送通知提醒成员确认
+5. **推送通知（已实现）**
+   - 新支出、账本邀请、确认和否决通过 APNs 通知相关成员
+   - 需要在 Apple Developer 为 `com.yhma.Evenly` 启用 Push Notifications
+   - Debug 真机验证 sandbox，TestFlight 验证 production；模拟器只验证编译、权限和路由逻辑
 
 6. **离线支持**
    - 离线时缓存数据，联网后同步

@@ -13,6 +13,7 @@ struct ContentView: View {
     @StateObject var auth = AuthManager()
     @StateObject var ledgerStore = LedgerStore()
     @StateObject var themeManager = ThemeManager()
+    @StateObject private var notifications = NotificationManager.shared
     @State private var selectedTab = 0
     @State private var sheetType: SheetType?
     @State private var searchText = ""
@@ -163,12 +164,38 @@ struct ContentView: View {
         .environmentObject(auth)
         .environmentObject(ledgerStore)
         .environmentObject(themeManager)
+        .onChange(of: auth.user?.id) { _, userID in
+            guard userID != nil else { return }
+            Task { await notifications.requestAuthorizationAndRegister() }
+            routePendingNotification()
+        }
+        .onChange(of: notifications.pendingDestination) { _, _ in
+            routePendingNotification()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, auth.user != nil {
                 ledgerStore.fetchLedgers()
             }
         }
         .preferredColorScheme(themeManager.applyTheme())
+    }
+
+    private func routePendingNotification() {
+        guard auth.user != nil, let destination = notifications.pendingDestination else { return }
+        switch destination {
+        case .ledger(let ledgerID):
+            if let ledger = ledgerStore.ledgers.first(where: { $0.id == ledgerID }) {
+                ledgerStore.currentLedger = ledger
+                selectedTab = 0
+                notifications.consumeDestination()
+            } else {
+                ledgerStore.fetchLedgers()
+            }
+        case .invitations:
+            selectedTab = 0
+            ledgerStore.fetchLedgers()
+            notifications.consumeDestination()
+        }
     }
 
     @ViewBuilder

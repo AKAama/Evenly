@@ -119,15 +119,8 @@ struct LedgerDrawerView: View {
             ledgerStore.setCurrentLedger(ledger)
             dismiss()
         }
-        .swipeActions(edge: .trailing) {
-            if ledger.ownerId == auth.user?.id {
-                Button(role: .destructive) {
-                    HapticManager.notificationOccurred(.warning)
-                    ledgerStore.deleteLedger(ledger)
-                } label: {
-                    Label("删除", systemImage: "trash")
-                }
-            }
+        .evenlyDestructiveSwipe(enabled: ledger.ownerId == auth.user?.id) {
+            ledgerStore.deleteLedger(ledger)
         }
         .contextMenu {
             Button {

@@ -30,13 +30,8 @@ struct LedgerListView: View {
                 } label: {
                     ledgerRowView(ledger)
                 }
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        HapticManager.notificationOccurred(.warning)
-                        store.deleteLedger(ledger)
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
+                .evenlyDestructiveSwipe {
+                    store.deleteLedger(ledger)
                 }
                 .contextMenu {
                     Button {

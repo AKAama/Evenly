@@ -27,128 +27,76 @@ struct AddMemberView: View {
         auth.user?.id == ledger.ownerId
     }
 
-    @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
     @State private var showingDeleteConfirmation = false
     @State private var memberToDelete: Person?
-    
-    // Search result
-    @State private var searchResult: UserSearchResult?
-    @State private var isSearching = false
     @State private var showingAddTemporary = false
     @State private var temporaryName = ""
-    @FocusState private var focusedField: Field?
+    @State private var showingInviteQR = false
+    @State private var showingInviteSearch = false
+    @FocusState private var temporaryNameFocused: Bool
 
-    enum Field {
-        case search
-        case temporaryName
+    private var activeMembers: [Person] {
+        currentParticipants.filter { !$0.isPending && !$0.isRejected }
+    }
+
+    private var pendingOrRejected: [Person] {
+        currentParticipants.filter { $0.isPending || $0.isRejected }
     }
 
     var body: some View {
         NavigationStack {
             List {
-                // Invite / manage only for the ledger owner — members just browse the roster.
-                if isOwner {
-                    Section {
-                        HStack(spacing: 12) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 20)
-
-                            TextField("输入邮箱或名字搜索", text: $searchText)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .focused($focusedField, equals: .search)
-                                .onSubmit {
-                                    searchUser()
-                                }
-                        }
-                        .padding(.vertical, 4)
-
-                        if isSearching {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                Spacer()
-                            }
-                        } else if let result = searchResult {
-                            searchResultView(result)
-                        }
-
-                        Button {
-                            HapticManager.impact(.medium)
-                            searchUser()
-                        } label: {
-                            HStack {
-                                Spacer()
-                                Label("搜索用户", systemImage: "magnifyingglass")
-                                    .fontWeight(.medium)
-                                Spacer()
-                            }
-                        }
-                        .disabled(searchText.isEmpty || isLoading || isSearching)
-                    } header: {
-                        Text("邀请成员")
-                    } footer: {
-                        Text("搜索已注册用户，或添加临时成员")
-                    }
-
-                    Section {
-                        Button {
-                            showingAddTemporary = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "person.crop.circle.badge.plus")
-                                    .foregroundStyle(.orange)
-                                Text("添加临时成员")
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Text("非注册用户")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } header: {
-                        Text("或")
-                    }
-                }
-
                 if let error = errorMessage {
                     Section {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            Text(error)
-                                .font(.subheadline)
-                        }
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
                     }
                 }
 
                 if let success = successMessage {
                     Section {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(success)
-                                .font(.subheadline)
-                        }
+                        Label(success, systemImage: "checkmark.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.green)
                     }
                 }
 
-                // Shared roster for everyone
+                // Primary: who is in this ledger
                 Section {
-                    ForEach(currentParticipants) { participant in
-                        memberRowView(participant)
-                            .listRowAnimation()
+                    if activeMembers.isEmpty {
+                        ContentUnavailableView(
+                            "还没有成员",
+                            systemImage: "person.2",
+                            description: Text(isOwner ? "点右上角「邀请」把朋友加进来" : "等待账本创建者邀请成员")
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(activeMembers) { participant in
+                            memberRowView(participant)
+                                .listRowAnimation()
+                        }
                     }
                 } header: {
-                    Text("当前成员 (\(currentParticipants.count))")
+                    Text("成员 (\(activeMembers.count))")
+                }
+
+                // Secondary: outstanding invites — only when relevant
+                if !pendingOrRejected.isEmpty {
+                    Section {
+                        ForEach(pendingOrRejected) { participant in
+                            memberRowView(participant)
+                                .listRowAnimation()
+                        }
+                    } header: {
+                        Text("邀请中 / 已拒绝 (\(pendingOrRejected.count))")
+                    }
                 }
             }
             .listStyle(.insetGrouped)
-            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("成员")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -160,12 +108,52 @@ struct AddMemberView: View {
                         Text("完成")
                     }
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("完成") {
-                        focusedField = nil
+                if isOwner {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button {
+                                HapticManager.impact(.medium)
+                                showingInviteQR = true
+                            } label: {
+                                Label("二维码邀请", systemImage: "qrcode")
+                            }
+                            Button {
+                                HapticManager.impact(.medium)
+                                showingInviteSearch = true
+                            } label: {
+                                Label("搜索用户邀请", systemImage: "person.badge.plus")
+                            }
+                            Button {
+                                HapticManager.impact(.medium)
+                                showingAddTemporary = true
+                            } label: {
+                                Label("添加临时成员", systemImage: "person.crop.circle.badge.plus")
+                            }
+                        } label: {
+                            Label("邀请", systemImage: "plus")
+                        }
+                        .accessibilityLabel("邀请成员")
                     }
                 }
+            }
+            .sheet(isPresented: $showingInviteQR) {
+                LedgerInviteQRView(ledgerId: ledgerId)
+                    .environmentObject(ledgerStore)
+            }
+            .sheet(isPresented: $showingInviteSearch) {
+                InviteBySearchSheet(
+                    isLoading: $isLoading,
+                    onInvite: { userId, displayName in
+                        addRegisteredMember(userId: userId, displayName: displayName) {
+                            showingInviteSearch = false
+                        }
+                    },
+                    onOfferTemporary: { name in
+                        temporaryName = name
+                        showingInviteSearch = false
+                        showingAddTemporary = true
+                    }
+                )
             }
             .confirmationDialog("确认删除", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
                 Button("删除", role: .destructive) {
@@ -181,12 +169,12 @@ struct AddMemberView: View {
                 NavigationStack {
                     Form {
                         Section {
-	                            TextField("输入成员名字", text: $temporaryName)
-	                                .focused($focusedField, equals: .temporaryName)
+                            TextField("输入成员名字", text: $temporaryName)
+                                .focused($temporaryNameFocused)
                         } header: {
                             Text("临时成员名字")
                         } footer: {
-                            Text("临时成员会保存到当前账本，但无法登录系统")
+                            Text("临时成员会保存在当前账本，但无法登录系统。适合当面分摊、对方暂无账号的情况。")
                         }
                     }
                     .navigationTitle("添加临时成员")
@@ -202,14 +190,21 @@ struct AddMemberView: View {
                             Button("添加") {
                                 addTemporaryMember()
                             }
-                            .disabled(temporaryName.isEmpty)
+                            .disabled(temporaryName.isEmpty || isLoading)
                         }
                     }
+                    .onAppear { temporaryNameFocused = true }
                 }
                 .presentationDetents([.medium])
             }
             .onAppear {
                 HapticManager.prepare()
+            }
+            .onChange(of: successMessage) { _, value in
+                guard value != nil else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    if successMessage == value { successMessage = nil }
+                }
             }
         }
     }
@@ -244,23 +239,9 @@ struct AddMemberView: View {
                     }
                 }
 
-                if participant.isPending {
-                    Text("等待对方接受邀请")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if participant.isRejected {
-                    Text("对方已拒绝邀请，可再次邀请")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if participant.userId != nil {
-                    Text("已注册用户")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                } else {
-                    Text("本地成员")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(memberSubtitle(for: participant))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -330,119 +311,15 @@ struct AddMemberView: View {
         }
     }
 
-    @ViewBuilder
-    private func searchResultView(_ result: UserSearchResult) -> some View {
-        HStack(spacing: 12) {
-            // Avatar
-            RemoteAvatarView(
-                avatarUrl: result.found ? result.avatarUrl : nil,
-                fallbackText: result.displayName ?? result.email,
-                size: 44
-            )
-            
-            VStack(alignment: .leading, spacing: 2) {
-                if result.found {
-                    Text(result.displayName ?? result.email)
-                        .font(.body)
-                        .lineLimit(1)
-                    Text(result.email)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                        Text("已注册用户")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    }
-                } else {
-                    Text("未找到「\(result.query)」")
-                        .font(.body)
-                    HStack(spacing: 4) {
-                        Image(systemName: "questionmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                        Text("可添加为临时成员")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
-            
-            Spacer()
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if result.found, let userId = result.userId {
-                addRegisteredMember(
-                    userId: userId,
-                    displayName: result.displayName ?? result.email.components(separatedBy: "@").first
-                )
-            } else if !result.found {
-                // 未找到用户时，弹窗询问是否添加为临时成员
-                temporaryName = result.email
-                showingAddTemporary = true
-            }
-        }
+    private func memberSubtitle(for participant: Person) -> String {
+        if participant.userId == ledger.ownerId { return "账本创建者" }
+        if participant.isPending { return "等待对方接受" }
+        if participant.isRejected { return "已拒绝，可再次邀请" }
+        if participant.isTemporary { return "临时成员" }
+        return "成员"
     }
 
-    private func searchUser() {
-        guard !searchText.isEmpty else { return }
-
-        isSearching = true
-        errorMessage = nil
-        searchResult = nil
-
-        // Search for user by email
-        Task {
-            do {
-                let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-                let users: [UserResponse] = try await APIClient.shared.get(APIEndpoints.searchUsers(q: query))
-
-                await MainActor.run {
-                    isSearching = false
-
-                    if let user = users.first(where: { $0.email.lowercased() == query.lowercased() }) ?? users.first {
-                        searchResult = UserSearchResult(
-                            query: query,
-                            found: true,
-                            userId: user.id,
-                            email: user.email,
-                            displayName: user.displayName,
-                            avatarUrl: user.avatarUrl
-                        )
-                    } else {
-                        // User not found - offer to add as temporary
-                        searchResult = UserSearchResult(
-                            query: query,
-                            found: false,
-                            userId: nil,
-                            email: query,
-                            displayName: nil,
-                            avatarUrl: nil
-                        )
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    isSearching = false
-                    // User not found - offer to add as temporary
-                    searchResult = UserSearchResult(
-                        query: searchText,
-                        found: false,
-                        userId: nil,
-                        email: searchText,
-                        displayName: nil,
-                        avatarUrl: nil
-                    )
-                }
-            }
-        }
-    }
-
-    private func addRegisteredMember(userId: String, displayName: String?) {
+    private func addRegisteredMember(userId: String, displayName: String?, onSuccess: (() -> Void)? = nil) {
         isLoading = true
         errorMessage = nil
 
@@ -452,8 +329,7 @@ struct AddMemberView: View {
             switch result {
             case .success:
                 successMessage = "邀请已发送，等待对方接受"
-                searchResult = nil
-                searchText = ""
+                onSuccess?()
             case .failure(let error):
                 errorMessage = error.localizedDescription
             }
@@ -529,6 +405,167 @@ struct UserSearchResult {
     let email: String
     let displayName: String?
     let avatarUrl: String?
+}
+
+// MARK: - Invite by search (owner-only sheet; keeps roster page clean)
+
+private struct InviteBySearchSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var isLoading: Bool
+    var onInvite: (String, String?) -> Void
+    var onOfferTemporary: (String) -> Void
+
+    @State private var searchText = ""
+    @State private var searchResult: UserSearchResult?
+    @State private var isSearching = false
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("邮箱或用户名", text: $searchText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($searchFocused)
+                            .submitLabel(.search)
+                            .onSubmit { searchUser() }
+                    }
+                    Button {
+                        HapticManager.impact(.medium)
+                        searchUser()
+                    } label: {
+                        if isSearching {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                Spacer()
+                            }
+                        } else {
+                            Text("搜索")
+                                .frame(maxWidth: .infinity)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching || isLoading)
+                } header: {
+                    Text("查找用户")
+                } footer: {
+                    Text("找到后发送邀请；找不到可改为临时成员。")
+                }
+
+                if let result = searchResult {
+                    Section {
+                        searchResultRow(result)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("搜索邀请")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .onAppear { searchFocused = true }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    @ViewBuilder
+    private func searchResultRow(_ result: UserSearchResult) -> some View {
+        HStack(spacing: 12) {
+            RemoteAvatarView(
+                avatarUrl: result.found ? result.avatarUrl : nil,
+                fallbackText: result.displayName ?? result.email,
+                size: 44
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                if result.found {
+                    Text(result.displayName ?? result.email)
+                        .font(.body.weight(.medium))
+                    Text(result.email)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("未找到「\(result.query)」")
+                        .font(.body)
+                    Text("可添加为临时成员")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            Spacer()
+            if result.found {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(EvenlyStyle.brandBlue)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            HapticManager.impact(.medium)
+            if result.found, let userId = result.userId {
+                onInvite(
+                    userId,
+                    result.displayName ?? result.email.components(separatedBy: "@").first
+                )
+            } else {
+                onOfferTemporary(result.query)
+            }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(result.found ? "邀请 \(result.displayName ?? result.email)" : "添加临时成员")
+    }
+
+    private func searchUser() {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        isSearching = true
+        searchResult = nil
+        Task {
+            do {
+                let users: [UserResponse] = try await APIClient.shared.get(APIEndpoints.searchUsers(q: query))
+                await MainActor.run {
+                    isSearching = false
+                    if let user = users.first(where: { $0.email.lowercased() == query.lowercased() }) ?? users.first {
+                        searchResult = UserSearchResult(
+                            query: query,
+                            found: true,
+                            userId: user.id,
+                            email: user.email,
+                            displayName: user.displayName,
+                            avatarUrl: user.avatarUrl
+                        )
+                    } else {
+                        searchResult = UserSearchResult(
+                            query: query,
+                            found: false,
+                            userId: nil,
+                            email: query,
+                            displayName: nil,
+                            avatarUrl: nil
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isSearching = false
+                    searchResult = UserSearchResult(
+                        query: query,
+                        found: false,
+                        userId: nil,
+                        email: query,
+                        displayName: nil,
+                        avatarUrl: nil
+                    )
+                }
+            }
+        }
+    }
 }
 
 struct MemberRowView: View {

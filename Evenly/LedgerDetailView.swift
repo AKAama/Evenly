@@ -262,15 +262,8 @@ struct LedgerDetailView: View {
             Divider()
         }
         .padding(.vertical, 4)
-        .swipeActions(edge: .trailing) {
-            if expense.createdBy == auth.user?.id {
-                Button(role: .destructive) {
-                    HapticManager.impact(.light)
-                    expenseToDelete = expense
-                } label: {
-                    Label("删除", systemImage: "trash")
-                }
-            }
+        .evenlyDestructiveSwipe(enabled: expense.createdBy == auth.user?.id) {
+            expenseToDelete = expense
         }
         .listRowAnimation()
     }

@@ -60,10 +60,27 @@ enum APIEndpoints {
     static func respondToInvitation(id: String, accept: Bool) -> String {
         "/ledgers/invitations/\(id)/\(accept ? "accept" : "reject")"
     }
+    static func inviteLink(ledgerId: String) -> String {
+        "/ledgers/\(ledgerId)/invite-link"
+    }
+    static func rotateInviteLink(ledgerId: String) -> String {
+        "/ledgers/\(ledgerId)/invite-link/rotate"
+    }
+    static func inviteLinkPreview(token: String) -> String {
+        let encoded = token.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? token
+        return "/ledgers/invite-links/\(encoded)/preview"
+    }
+    static func joinInviteLink(token: String) -> String {
+        let encoded = token.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? token
+        return "/ledgers/invite-links/\(encoded)/join"
+    }
 
     // MARK: - Expenses
     static func expenses(ledgerId: String) -> String {
         "/expenses/ledgers/\(ledgerId)/expenses"
+    }
+    static func compoundExpense(ledgerId: String) -> String {
+        "/expenses/ledgers/\(ledgerId)/expenses/compound"
     }
     static func voiceExpenseDraft(ledgerId: String) -> String {
         "/expenses/ledgers/\(ledgerId)/voice-draft"
@@ -72,6 +89,9 @@ enum APIEndpoints {
         "/expenses/ledgers/\(ledgerId)/voice-session"
     }
     static func expense(ledgerId: String, expenseId: String) -> String {
+        "/expenses/\(expenseId)"
+    }
+    static func updateExpense(expenseId: String) -> String {
         "/expenses/\(expenseId)"
     }
     static func confirmExpense(expenseId: String) -> String {

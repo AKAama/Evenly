@@ -30,6 +30,9 @@ struct ContentView: View {
     @State private var showingLeaveLedgerAlert = false
     @State private var showingDeleteLedgerAlert = false
     @State private var didLongPressLedgerMenu = false
+    @State private var joinToast: String?
+    @State private var isHandlingJoinLink = false
+    @ObservedObject private var deepLinks = DeepLinkInbox.shared
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
@@ -59,6 +62,7 @@ struct ContentView: View {
         case ledgerDrawer
         case addLedger
         case addExpense
+        case editExpense(Expense, Ledger)
         /// Single members surface: roster for all; invite/manage tools for owner only.
         case members(Ledger)
         case expenseDetail(Expense, Ledger)
@@ -68,6 +72,7 @@ struct ContentView: View {
             case .ledgerDrawer: return "ledgerDrawer"
             case .addLedger: return "addLedger"
             case .addExpense: return "addExpense"
+            case .editExpense(let expense, _): return "editExpense-\(expense.id.uuidString)"
             case .members(let ledger): return "members-\(ledger.id.uuidString)"
             case .expenseDetail(let expense, _): return "expense-\(expense.id.uuidString)"
             }
@@ -180,9 +185,21 @@ struct ContentView: View {
                 ledgerStore.bind(userId: userID)
                 Task { await notifications.requestAuthorizationAndRegister() }
                 routePendingNotification()
+                consumePendingJoinTokenIfNeeded()
             } else {
                 ledgerStore.stop()
             }
+        }
+        // Also attach here so links still work if the WindowGroup handlers race with mount.
+        .onOpenURL { url in
+            deepLinks.handle(url: url)
+        }
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            deepLinks.handle(userActivity: activity)
+        }
+        .onChange(of: deepLinks.pendingJoinToken) { _, token in
+            guard token != nil else { return }
+            consumePendingJoinTokenIfNeeded()
         }
         .onChange(of: notifications.pendingDestination) { _, _ in
             routePendingNotification()
@@ -197,16 +214,87 @@ struct ContentView: View {
             if phase == .active, let userID = auth.user?.id {
                 ledgerStore.bind(userId: userID)
                 Task { await notifications.requestAuthorizationAndRegister() }
+                consumePendingJoinTokenIfNeeded()
             }
         }
         .onAppear {
+            deepLinks.restorePersistedIfNeeded()
             if let userID = auth.user?.id {
                 selectedTab = 0
                 ledgerStore.bind(userId: userID)
                 Task { await notifications.requestAuthorizationAndRegister() }
             }
+            consumePendingJoinTokenIfNeeded()
         }
         .preferredColorScheme(themeManager.applyTheme())
+        .overlay(alignment: .bottom) {
+            if let joinToast {
+                Text(joinToast)
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 28)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(EvenlyMotion.ui, value: joinToast)
+    }
+
+    private func consumePendingJoinTokenIfNeeded() {
+        deepLinks.restorePersistedIfNeeded()
+        guard let token = deepLinks.pendingJoinToken ?? DeepLinkRouter.loadPendingJoinToken(),
+              !token.isEmpty else { return }
+
+        // Cold start: session restore is async — wait briefly before asking user to log in.
+        if auth.user == nil {
+            Task { @MainActor in
+                for _ in 0..<40 {
+                    if auth.user != nil { break }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+                if auth.user == nil {
+                    auth.isGuestMode = false
+                    joinToast = "登录后将自动加入账本"
+                    HapticManager.notificationOccurred(.warning)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { joinToast = nil }
+                    return
+                }
+                await performJoin(token: token)
+            }
+            return
+        }
+
+        Task { @MainActor in
+            await performJoin(token: token)
+        }
+    }
+
+    @MainActor
+    private func performJoin(token: String) async {
+        guard auth.user != nil else { return }
+        guard !isHandlingJoinLink else { return }
+        isHandlingJoinLink = true
+        selectedTab = 0
+        do {
+            let result = try await ledgerStore.joinViaInviteToken(token)
+            deepLinks.clearPendingJoinToken()
+            isHandlingJoinLink = false
+            let message = result.status == "already_member"
+                ? "你已在「\(result.ledgerName)」中"
+                : "已加入「\(result.ledgerName)」"
+            joinToast = message
+            HapticManager.notificationOccurred(.success)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                joinToast = nil
+            }
+        } catch {
+            isHandlingJoinLink = false
+            // Keep pending token so a retry after re-login still works.
+            actionError = error.localizedDescription
+            HapticManager.notificationOccurred(.error)
+            print("[DeepLink] join failed: \(error.localizedDescription)")
+        }
     }
 
     @ViewBuilder
@@ -273,13 +361,33 @@ struct ContentView: View {
         case .addExpense:
             addExpenseSheet
 
+        case .editExpense(let expense, let ledger):
+            AddExpenseView(
+                expense: expense,
+                participants: ledger.participants,
+                currentUserId: auth.user?.id,
+                ledgerId: ledger.id,
+                onSave: { edited in
+                    await submitEditExpense(edited, to: ledger)
+                }
+            )
+
         case .members(let ledger):
             AddMemberView(ledgerId: ledger.id)
                 .environmentObject(auth)
                 .environmentObject(ledgerStore)
 
         case .expenseDetail(let expense, let ledger):
-            NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
+            NavigationStack {
+                ExpenseDetailView(
+                    expense: expense,
+                    ledger: ledger,
+                    currentUserId: auth.user?.id,
+                    onEdit: {
+                        sheetType = .editExpense(expense, ledger)
+                    }
+                )
+            }
         }
     }
 
@@ -292,6 +400,27 @@ struct ContentView: View {
                 ledgerId: ledger.id,
                 onSave: { newExpense in
                     await submitAddExpense(newExpense, to: ledger)
+                },
+                onSaveCompound: { title, cost, income, costPayer, incomeReceiver, members in
+                    await withCheckedContinuation { continuation in
+                        ledgerStore.addCompoundExpense(
+                            title: title,
+                            costAmount: cost,
+                            incomeAmount: income,
+                            costPayer: costPayer,
+                            incomeReceiver: incomeReceiver,
+                            participants: members,
+                            to: ledger
+                        ) { result in
+                            switch result {
+                            case .success:
+                                loadSettlementData(for: ledger)
+                                continuation.resume(returning: .success(()))
+                            case .failure(let error):
+                                continuation.resume(returning: .failure(error))
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -309,6 +438,29 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func submitEditExpense(_ expense: Expense, to ledger: Ledger) async -> Result<Void, Error> {
+        await withCheckedContinuation { continuation in
+            ledgerStore.updateExpense(expense, in: ledger) { result in
+                switch result {
+                case .success:
+                    loadSettlementData(for: ledger)
+                    continuation.resume(returning: .success(()))
+                case .failure(let error):
+                    continuation.resume(returning: .failure(error))
+                }
+            }
+        }
+    }
+
+    private func canEditExpense(_ expense: Expense) -> Bool {
+        expense.status == .pending && expense.createdBy == auth.user?.id
+    }
+
+    private func openEditExpense(_ expense: Expense, in ledger: Ledger) {
+        HapticManager.impact(.medium)
+        sheetType = .editExpense(expense, ledger)
     }
 
     private var expenseDeleteMessage: String {
@@ -587,6 +739,7 @@ struct ContentView: View {
     @ViewBuilder
     private func expenseListSection(_ ledger: Ledger) -> some View {
         let expenses = filteredExpenses(for: ledger)
+        let items = Expense.listItems(from: expenses)
         Section {
             if ledger.expenses.isEmpty {
                 if ledgerStore.isLoadingCurrentDetail {
@@ -602,89 +755,202 @@ struct ContentView: View {
             } else if expenses.isEmpty {
                 noMatchingExpensesPlaceholder
             } else {
-                ForEach(expenses) { expense in
-                    expenseListRow(expense, ledger: ledger)
+                ForEach(items) { item in
+                    switch item {
+                    case .single(let expense):
+                        expenseListRow(expense, ledger: ledger)
+                    case .group(_, let groupExpenses):
+                        expenseGroupListRow(groupExpenses, ledger: ledger)
+                    }
                 }
             }
         } header: {
-            expenseSectionHeader(count: expenses.count)
+            // Count user-facing cards (grouped cost+income counts as one).
+            expenseSectionHeader(count: items.count)
+        }
+    }
+
+    private func expenseGroupListRow(_ expenses: [Expense], ledger: Ledger) -> some View {
+        let item = ExpenseListItem.group(id: expenses.first?.groupId ?? UUID(), expenses: expenses)
+        let cost = item.cost
+        let income = item.income
+        let primary = item.representative
+        let peer = (primary.kind == .expense ? income : cost)
+        return VStack(alignment: .leading, spacing: 8) {
+            ExpenseUnifiedListRow(expense: primary, linkedPeer: peer)
+            ForEach(expenses.filter { canRespond(to: $0) }) { expense in
+                HStack {
+                    ExpenseKindChip(kind: expense.kind)
+                    Spacer()
+                    Button {
+                        HapticManager.impact(.medium, intensity: 0.9)
+                        respond(to: expense, with: .confirmed, in: ledger)
+                    } label: {
+                        Text("确认\(expense.kind.displayName)")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(respondingExpenseIds.contains(expense.id))
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .listRowAnimation()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openExpenseDetail(primary, in: ledger)
+        }
+        .contextMenu {
+            Button { openExpenseDetail(primary, in: ledger) } label: {
+                Label("查看详情", systemImage: "info.circle")
+            }
+            if let cost, canEditExpense(cost) {
+                Button { openEditExpense(cost, in: ledger) } label: {
+                    Label("编辑支出", systemImage: "pencil")
+                }
+            }
+            if let income, canEditExpense(income) {
+                Button { openEditExpense(income, in: ledger) } label: {
+                    Label("编辑收入", systemImage: "pencil")
+                }
+            }
+            if primary.createdBy == auth.user?.id {
+                Divider()
+                Button(role: .destructive) {
+                    prepareToDeleteExpense(cost ?? primary, in: ledger)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if let first = expenses.first(where: { canRespond(to: $0) }) {
+                Button {
+                    HapticManager.impact(.medium, intensity: 0.95)
+                    respond(to: first, with: .confirmed, in: ledger)
+                } label: {
+                    Label("确认", systemImage: "checkmark.circle.fill")
+                }
+                .tint(.green)
+            }
+        }
+        .evenlyDestructiveSwipe(enabled: primary.createdBy == auth.user?.id) {
+            prepareToDeleteExpense(cost ?? primary, in: ledger)
         }
     }
 
     private func expenseListRow(_ expense: Expense, ledger: Ledger) -> some View {
-        expenseRowView(expense, ledger: ledger)
-            .listRowAnimation()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                openExpenseDetail(expense, in: ledger)
-            }
-            .contextMenu {
-                Button {
-                    openExpenseDetail(expense, in: ledger)
-                } label: {
-                    Label("查看详情", systemImage: "info.circle")
-                }
-
-                Button {
-                    copyExpenseTitle(expense)
-                } label: {
-                    Label("复制标题", systemImage: "doc.on.doc")
-                }
-
-                Button {
-                    copyExpenseAmount(expense)
-                } label: {
-                    Label("复制金额", systemImage: "yensign.circle")
-                }
-
-                if canRespond(to: expense) {
-                    Divider()
+        VStack(alignment: .leading, spacing: 8) {
+            ExpenseUnifiedListRow(expense: expense)
+            if canRespond(to: expense) {
+                HStack {
+                    Spacer()
+                    Button {
+                        HapticManager.impact(.rigid, intensity: 0.8)
+                        respond(to: expense, with: .rejected, in: ledger)
+                    } label: {
+                        Label("拒绝", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(respondingExpenseIds.contains(expense.id))
 
                     Button {
                         HapticManager.impact(.medium, intensity: 0.9)
                         respond(to: expense, with: .confirmed, in: ledger)
                     } label: {
-                        Label("确认账单", systemImage: "checkmark.circle")
+                        if respondingExpenseIds.contains(expense.id) {
+                            ProgressView()
+                        } else {
+                            Text("确认")
+                        }
                     }
-
-                    Button(role: .destructive) {
-                        HapticManager.impact(.rigid, intensity: 0.85)
-                        respond(to: expense, with: .rejected, in: ledger)
-                    } label: {
-                        Label("拒绝账单", systemImage: "xmark.circle")
-                    }
-                }
-
-                if expense.createdBy == auth.user?.id {
-                    Divider()
-
-                    Button(role: .destructive) {
-                        prepareToDeleteExpense(expense, in: ledger)
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(respondingExpenseIds.contains(expense.id))
                 }
             }
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if canRespond(to: expense) {
-                    Button {
-                        HapticManager.impact(.medium, intensity: 0.95)
-                        respond(to: expense, with: .confirmed, in: ledger)
-                    } label: {
-                        Label("确认", systemImage: "checkmark.circle.fill")
-                    }
-                    .tint(.green)
+        }
+        .padding(.vertical, 2)
+        .listRowAnimation()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openExpenseDetail(expense, in: ledger)
+        }
+        .contextMenu {
+            Button {
+                openExpenseDetail(expense, in: ledger)
+            } label: {
+                Label("查看详情", systemImage: "info.circle")
+            }
+
+            Button {
+                copyExpenseTitle(expense)
+            } label: {
+                Label("复制标题", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                copyExpenseAmount(expense)
+            } label: {
+                Label("复制金额", systemImage: "yensign.circle")
+            }
+
+            if canRespond(to: expense) {
+                Divider()
+                Button {
+                    HapticManager.impact(.medium, intensity: 0.9)
+                    respond(to: expense, with: .confirmed, in: ledger)
+                } label: {
+                    Label("确认账单", systemImage: "checkmark.circle")
+                }
+                Button(role: .destructive) {
+                    HapticManager.impact(.rigid, intensity: 0.85)
+                    respond(to: expense, with: .rejected, in: ledger)
+                } label: {
+                    Label("拒绝账单", systemImage: "xmark.circle")
                 }
             }
-            .swipeActions(edge: .trailing) {
-                if expense.createdBy == auth.user?.id {
-                    Button(role: .destructive) {
-                        prepareToDeleteExpense(expense, in: ledger)
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
+
+            if canEditExpense(expense) {
+                Divider()
+                Button {
+                    openEditExpense(expense, in: ledger)
+                } label: {
+                    Label("编辑", systemImage: "pencil")
                 }
             }
+
+            if expense.createdBy == auth.user?.id {
+                Divider()
+                Button(role: .destructive) {
+                    prepareToDeleteExpense(expense, in: ledger)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if canRespond(to: expense) {
+                Button {
+                    HapticManager.impact(.medium, intensity: 0.95)
+                    respond(to: expense, with: .confirmed, in: ledger)
+                } label: {
+                    Label("确认", systemImage: "checkmark.circle.fill")
+                }
+                .tint(.green)
+            } else if canEditExpense(expense) {
+                Button {
+                    openEditExpense(expense, in: ledger)
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                .tint(EvenlyStyle.brandBlue)
+            }
+        }
+        .evenlyDestructiveSwipe(enabled: expense.createdBy == auth.user?.id) {
+            prepareToDeleteExpense(expense, in: ledger)
+        }
     }
 
     private var emptyExpensesPlaceholder: some View {
@@ -855,88 +1121,6 @@ struct ContentView: View {
         .frame(minWidth: 52)
     }
 
-    private func expenseRowView(_ expense: Expense, ledger: Ledger) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.20 : 0.12))
-                        .frame(width: 40, height: 40)
-                    expenseIconView(expense)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(expense.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .dynamicTypeSize(.accessibility2)
-                    
-                    HStack(spacing: 8) {
-                        Label(expense.payer.name, systemImage: "person")
-                        if expense.participants.count > 1 {
-                            Label("\(expense.participants.count)人分摊", systemImage: "person.2")
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(formatAmount(expense.amount))
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    expenseStatusLabel(expense)
-                }
-            }
-
-            if canRespond(to: expense) {
-                HStack {
-                    Spacer()
-                    Button {
-                        HapticManager.impact(.rigid, intensity: 0.8)
-                        respond(to: expense, with: .rejected, in: ledger)
-                    } label: {
-                        Label("拒绝", systemImage: "xmark.circle")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(respondingExpenseIds.contains(expense.id))
-
-                    Button {
-                        HapticManager.impact(.medium, intensity: 0.9)
-                        respond(to: expense, with: .confirmed, in: ledger)
-                    } label: {
-                        if respondingExpenseIds.contains(expense.id) {
-                            ProgressView()
-                        } else {
-                            Text("确认")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(respondingExpenseIds.contains(expense.id))
-                }
-            } else if let userStatus = currentUserConfirmationStatus(for: expense), expense.status == .pending {
-                Label(userStatus == .confirmed ? "你已确认" : "你已拒绝", systemImage: userStatus == .confirmed ? "checkmark.circle" : "xmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(userStatus == .confirmed ? .green : .red)
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
-    @ViewBuilder
-    private func expenseIconView(_ expense: Expense) -> some View {
-        if let icon = expense.icon, icon.type == .emoji {
-            Text(icon.value)
-                .font(.system(size: 22))
-        } else {
-            Image(systemName: expense.icon?.value ?? "yensign.circle.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(EvenlyStyle.brandBlue)
-        }
-    }
-
     // MARK: - Helper Methods
 
     private func formatAmount(_ amount: Decimal) -> String {
@@ -961,23 +1145,7 @@ struct ContentView: View {
         return formatter.string(from: date)
     }
 
-    @ViewBuilder
-    private func expenseStatusLabel(_ expense: Expense) -> some View {
-        switch expense.status {
-        case .pending:
-            Label("待确认", systemImage: "hourglass")
-                .font(.caption)
-                .foregroundStyle(.orange)
-        case .confirmed:
-            Label("已确认", systemImage: "checkmark.circle")
-                .font(.caption)
-                .foregroundStyle(.green)
-        case .rejected:
-            Label("已拒绝", systemImage: "xmark.circle")
-                .font(.caption)
-                .foregroundStyle(.red)
-        }
-    }
+
 
     private func canRespond(to expense: Expense) -> Bool {
         guard expense.status == .pending,
@@ -1114,10 +1282,12 @@ struct ContentView: View {
 
         for expense in ledger.expenses {
             if expense.participants.isEmpty { continue }
+            // Income inverts signs (receiver held money; participants are entitled to shares).
+            let sign: Decimal = expense.kind.isIncome ? -1 : 1
             let share = expense.amount / Decimal(expense.participants.count)
-            balances[expense.payer, default: 0] += expense.amount - share
-            for participant in expense.participants where participant != expense.payer {
-                balances[participant, default: 0] -= share
+            balances[expense.payer, default: 0] += sign * expense.amount
+            for participant in expense.participants {
+                balances[participant, default: 0] -= sign * share
             }
         }
 

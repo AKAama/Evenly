@@ -78,51 +78,103 @@ struct LedgerMembersView: View {
 struct ExpenseDetailView: View {
     let expense: Expense
     let ledger: Ledger
+    var currentUserId: String? = nil
+    var onEdit: (() -> Void)? = nil
+
+    private var canEdit: Bool {
+        expense.status == .pending && expense.createdBy == currentUserId
+    }
+
+    private var groupPeers: [Expense] {
+        guard let gid = expense.groupId else { return [expense] }
+        let peers = ledger.expenses.filter { $0.groupId == gid }
+        return peers.isEmpty ? [expense] : peers
+    }
 
     var body: some View {
         List {
             Section {
-                LabeledContent("金额", value: formattedAmount)
-                LabeledContent("付款人", value: expense.payer.name)
-                if let date = expense.expenseDate {
-                    LabeledContent("日期", value: date.formatted(date: .abbreviated, time: .omitted))
-                }
-                LabeledContent("状态", value: statusText)
+                ExpenseDetailHeader(expense: expense, ledgerExpenses: ledger.expenses)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
 
             if let note = expense.note, !note.isEmpty {
-                Section("备注") { Text(note) }
+                Section("备注") {
+                    Text(note)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                }
+            }
+
+            // Linked pair: show both legs with same chrome as list rows.
+            if groupPeers.count > 1 {
+                Section {
+                    ForEach(groupPeers.sorted { lhs, rhs in
+                        if lhs.kind != rhs.kind { return lhs.kind == .expense }
+                        return false
+                    }) { leg in
+                        ExpenseUnifiedListRow(expense: leg)
+                            .padding(.vertical, 2)
+                    }
+                } header: {
+                    Text("明细")
+                } footer: {
+                    Text("关联记账会拆成支出与收入两笔明细，结算按两笔一起计算。")
+                }
             }
 
             Section("参与成员") {
                 ForEach(expense.participants) { participant in
-                    HStack {
+                    HStack(spacing: 12) {
                         RemoteAvatarView(
                             avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
                             fallbackText: participant.name,
                             size: 36
                         )
-                        Text(participant.name)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(participant.name)
+                                .font(.body)
+                            if participant.userId == expense.payer.userId {
+                                Text(ExpenseChrome.roleLabel(for: expense.kind))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Spacer()
                         confirmationLabel(for: participant)
                     }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            if canEdit {
+                Section {
+                    Button {
+                        HapticManager.impact(.medium)
+                        onEdit?()
+                    } label: {
+                        Label("编辑账单", systemImage: "pencil")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } footer: {
+                    Text("仅待确认账单可由创建者编辑。保存后其他人需重新确认。")
                 }
             }
         }
-        .navigationTitle(expense.title)
+        .listStyle(.insetGrouped)
+        .navigationTitle(expense.kind.displayName)
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var formattedAmount: String {
-        let value = NSDecimalNumber(decimal: expense.amount)
-        return "¥\(value.stringValue)"
-    }
-
-    private var statusText: String {
-        switch expense.status {
-        case .pending: return "待确认"
-        case .confirmed: return "已确认"
-        case .rejected: return "已拒绝"
+        .toolbar {
+            if canEdit {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("编辑") {
+                        HapticManager.impact(.medium)
+                        onEdit?()
+                    }
+                }
+            }
         }
     }
 
@@ -135,17 +187,25 @@ struct ExpenseDetailView: View {
 
     @ViewBuilder
     private func confirmationLabel(for participant: Person) -> some View {
-        if participant.userId == expense.createdBy {
-            Label("创建者", systemImage: "checkmark.circle.fill")
+        if participant.userId == expense.createdBy
+            || participant.userId == expense.payer.userId {
+            Label("无需确认", systemImage: "checkmark.circle.fill")
+                .font(.caption)
                 .foregroundStyle(.green)
         } else {
             switch expense.confirmationStatus(for: participant) {
             case .confirmed:
-                Label("已确认", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Label("已确认", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             case .rejected:
-                Label("已拒绝", systemImage: "xmark.circle.fill").foregroundStyle(.red)
+                Label("已拒绝", systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             case .pending:
-                Text(participant.isTemporary ? "无需确认" : "待确认").foregroundStyle(.secondary)
+                Text(participant.isTemporary ? "无需确认" : "待确认")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

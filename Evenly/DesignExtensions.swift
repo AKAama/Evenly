@@ -522,7 +522,7 @@ struct SwipeActionHaptic: ViewModifier {
     let role: ButtonRole?
     let icon: String
     let action: () -> Void
-    
+
     func body(content: Content) -> some View {
         content
             .swipeActions(edge: .trailing, allowsFullSwipe: role == .destructive) {
@@ -532,6 +532,32 @@ struct SwipeActionHaptic: ViewModifier {
                 } label: {
                     Label("删除", systemImage: icon)
                 }
+                .tint(.red)
+            }
+    }
+}
+
+/// Shared trailing destructive swipe — red trash, full-swipe, warning haptic.
+/// Use for ledger/expense/member deletes so list rows feel the same.
+struct EvenlyDestructiveSwipe: ViewModifier {
+    let enabled: Bool
+    let title: String
+    let systemImage: String
+    let allowsFullSwipe: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .trailing, allowsFullSwipe: allowsFullSwipe && enabled) {
+                if enabled {
+                    Button(role: .destructive) {
+                        HapticManager.notificationOccurred(.warning)
+                        action()
+                    } label: {
+                        Label(title, systemImage: systemImage)
+                    }
+                    .tint(.red)
+                }
             }
     }
 }
@@ -539,6 +565,25 @@ struct SwipeActionHaptic: ViewModifier {
 extension View {
     func swipeActionWithHaptic(role: ButtonRole? = nil, icon: String = "trash", action: @escaping () -> Void) -> some View {
         modifier(SwipeActionHaptic(role: role, icon: icon, action: action))
+    }
+
+    /// Trailing red delete swipe, matching ledger list behavior.
+    func evenlyDestructiveSwipe(
+        enabled: Bool = true,
+        title: String = "删除",
+        systemImage: String = "trash",
+        allowsFullSwipe: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        modifier(
+            EvenlyDestructiveSwipe(
+                enabled: enabled,
+                title: title,
+                systemImage: systemImage,
+                allowsFullSwipe: allowsFullSwipe,
+                action: action
+            )
+        )
     }
 }
 

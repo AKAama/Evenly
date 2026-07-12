@@ -449,6 +449,62 @@ final class LedgerStore: ObservableObject {
         }
     }
 
+    // MARK: - QR / Universal Link invites
+
+    func fetchInviteLink(ledgerId: UUID) async throws -> LedgerInviteLinkResponse {
+        try await api.get(APIEndpoints.inviteLink(ledgerId: ledgerId.uuidString))
+    }
+
+    func rotateInviteLink(ledgerId: UUID) async throws -> LedgerInviteLinkResponse {
+        try await api.post(APIEndpoints.rotateInviteLink(ledgerId: ledgerId.uuidString))
+    }
+
+    /// Join a ledger via share/QR token, then select it as current.
+    func joinViaInviteToken(_ token: String) async throws -> JoinLedgerResponse {
+        let response: JoinLedgerResponse = try await api.post(APIEndpoints.joinInviteLink(token: token))
+        guard let id = UUID(uuidString: response.ledgerId) else { return response }
+
+        // Pin preferred ledger before list refresh so resolvePreferredLedger picks it up.
+        await MainActor.run {
+            UserDefaults.standard.set(response.ledgerId, forKey: self.userDefaultsKey)
+        }
+
+        // Refresh membership list then force-load overview for the joined ledger.
+        do {
+            let responses: [LedgerResponse] = try await api.get(APIEndpoints.ledgers)
+            await MainActor.run {
+                let previousById = Dictionary(uniqueKeysWithValues: self.ledgers.map { ($0.id, $0) })
+                self.ledgers = responses.map { item in
+                    var ledger = Ledger(from: item)
+                    if let previous = UUID(uuidString: item.id).flatMap({ previousById[$0] }) {
+                        if !previous.expenses.isEmpty {
+                            ledger.expenses = previous.expenses
+                            ledger.expenseCount = previous.expenses.count
+                        }
+                        if !previous.participants.isEmpty {
+                            ledger.participants = previous.participants
+                            ledger.members = previous.members
+                            ledger.memberIds = previous.memberIds
+                            ledger.memberCount = previous.participants.filter(\.isActive).count
+                        }
+                    }
+                    return ledger
+                }
+                .sorted { $0.title < $1.title }
+
+                if let joined = self.ledgers.first(where: { $0.id == id }) {
+                    self.currentLedger = joined
+                }
+                self.persistLedgersCache()
+            }
+            _ = try? await loadOverview(ledgerId: id, force: true)
+        } catch {
+            // Join already succeeded; surface list error separately if needed.
+            await MainActor.run { self.error = error.localizedDescription }
+        }
+        return response
+    }
+
     // MARK: - Member Management
 
     func addMember(
@@ -590,6 +646,85 @@ final class LedgerStore: ObservableObject {
         }
     }
 
+    /// Cost + income in one shot (e.g. lottery). Returns both rows; list groups by group_id.
+    func addCompoundExpense(
+        title: String,
+        costAmount: Decimal,
+        incomeAmount: Decimal,
+        costPayer: Person,
+        incomeReceiver: Person,
+        participants: [Person],
+        to ledger: Ledger,
+        note: String? = nil,
+        category: String? = nil,
+        icon: ExpenseIcon? = nil,
+        completion: @escaping (Result<(cost: Expense, income: Expense), Error>) -> Void
+    ) {
+        guard userId != nil else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
+            return
+        }
+        guard let costPayerId = ledger.registeredUserId(for: costPayer),
+              let incomeReceiverId = ledger.registeredUserId(for: incomeReceiver) else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "付款人/收款人必须是已注册成员"])))
+            return
+        }
+        let memberIds = participants.map { $0.id.uuidString }
+        guard !memberIds.isEmpty else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "请选择参与人"])))
+            return
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        let body = CompoundExpenseCreate(
+            title: title,
+            expenseDate: formatter.string(from: Date()),
+            note: note,
+            category: category,
+            iconType: icon?.type.rawValue,
+            iconValue: icon?.value,
+            participantMemberIds: memberIds,
+            costAmount: costAmount,
+            costPayerId: costPayerId,
+            incomeAmount: incomeAmount,
+            incomeReceiverId: incomeReceiverId
+        )
+
+        Task {
+            do {
+                let response: CompoundExpenseResponse = try await api.post(
+                    APIEndpoints.compoundExpense(ledgerId: ledger.id.uuidString),
+                    body: body
+                )
+                var cost = Expense(from: response.cost, participants: participants)
+                var income = Expense(from: response.income, participants: participants)
+                if cost.icon == nil { cost.icon = icon }
+                if income.icon == nil { income.icon = icon }
+                if cost.category == nil { cost.category = category }
+                if income.category == nil { income.category = category }
+
+                await MainActor.run {
+                    if var updated = self.currentLedger, updated.id == ledger.id {
+                        updated.expenses.insert(contentsOf: [cost, income], at: 0)
+                        updated.expenseCount = updated.expenses.count
+                        self.currentLedger = updated
+                        if let idx = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
+                            self.ledgers[idx] = updated
+                        }
+                    }
+                    completion(.success((cost, income)))
+                }
+            } catch {
+                await MainActor.run { completion(.failure(error)) }
+            }
+        }
+    }
+
     func addExpense(_ expense: Expense, to ledger: Ledger, completion: @escaping (Result<Expense, Error>) -> Void) {
         guard userId != nil else {
             completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
@@ -636,6 +771,64 @@ final class LedgerStore: ObservableObject {
                     completion(.failure(error))
                 }
             }
+        }
+    }
+
+    /// Update a pending expense (creator only on server). Replaces local row.
+    func updateExpense(_ expense: Expense, in ledger: Ledger, completion: @escaping (Result<Expense, Error>) -> Void) {
+        guard userId != nil else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
+            return
+        }
+        guard let payerId = ledger.registeredUserId(for: expense.payer) else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "付款人必须是已注册成员"])))
+            return
+        }
+
+        Task {
+            do {
+                let request = expense.toUpdateRequest(payerId: payerId)
+                let response: ExpenseResponse = try await api.put(
+                    APIEndpoints.updateExpense(expenseId: expense.id.uuidString),
+                    body: request
+                )
+                // Prefer participants from the edit form; hydrate status/confirmations from server.
+                var updated = Expense(from: response, participants: expense.participants)
+                if updated.icon == nil { updated.icon = expense.icon }
+                if updated.category == nil { updated.category = expense.category }
+                // Mirror auto-confirm for creator/payer until next overview refresh.
+                updated.confirmations[response.createdBy] = .confirmed
+                if let payerUserId = expense.payer.userId {
+                    updated.confirmations[payerUserId] = .confirmed
+                }
+
+                await MainActor.run {
+                    self.replaceExpense(updated, in: ledger.id)
+                    completion(.success(updated))
+                }
+            } catch {
+                await MainActor.run {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    private func replaceExpense(_ expense: Expense, in ledgerId: UUID) {
+        if var updatedLedger = currentLedger, updatedLedger.id == ledgerId {
+            if let idx = updatedLedger.expenses.firstIndex(where: { $0.id == expense.id }) {
+                updatedLedger.expenses[idx] = expense
+            }
+            currentLedger = updatedLedger
+            if let index = ledgers.firstIndex(where: { $0.id == ledgerId }) {
+                ledgers[index] = updatedLedger
+            }
+        } else if let index = ledgers.firstIndex(where: { $0.id == ledgerId }) {
+            var updatedLedger = ledgers[index]
+            if let idx = updatedLedger.expenses.firstIndex(where: { $0.id == expense.id }) {
+                updatedLedger.expenses[idx] = expense
+            }
+            ledgers[index] = updatedLedger
         }
     }
 

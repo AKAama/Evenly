@@ -408,7 +408,7 @@
 				ENABLE_PREVIEWS = YES;
 				EVENLY_API_BASE_URL = "http://192.168.124.14:8000";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "马业辉牛逼";
+				INFOPLIST_KEY_CFBundleDisplayName = Evenly;
 				INFOPLIST_KEY_EVENLY_API_BASE_URL = "$(EVENLY_API_BASE_URL)";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -447,7 +447,7 @@
 				EVENLY_API_BASE_URL = "https://evenly.ismyh.cn/api";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "马业辉牛逼";
+				INFOPLIST_KEY_CFBundleDisplayName = Evenly;
 				INFOPLIST_KEY_EVENLY_API_BASE_URL = "$(EVENLY_API_BASE_URL)";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

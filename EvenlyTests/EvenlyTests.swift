@@ -8,6 +8,24 @@ final class EvenlyTests: XCTestCase {
         XCTAssertEqual("Evenly", "Evenly")
     }
 
+    func testDeepLinkRouterParsesJoinUniversalLinkAndScheme() {
+        let https = URL(string: "https://app.ismyh.cn/join/Ab3xK9mQ_test")!
+        XCTAssertEqual(DeepLinkRouter.parse(https), .joinLedger(token: "Ab3xK9mQ_test"))
+
+        let scheme = URL(string: "evenly://join/Ab3xK9mQ_test")!
+        XCTAssertEqual(DeepLinkRouter.parse(scheme), .joinLedger(token: "Ab3xK9mQ_test"))
+
+        let other = URL(string: "https://example.com/join/nope")!
+        XCTAssertNil(DeepLinkRouter.parse(other))
+    }
+
+    func testContentViewHandlesUniversalLinkUserActivity() throws {
+        let source = try sourceFile(named: "EvenlyApp.swift")
+        XCTAssertTrue(source.contains("onContinueUserActivity"))
+        XCTAssertTrue(source.contains("NSUserActivityTypeBrowsingWeb"))
+        XCTAssertTrue(source.contains("DeepLinkInbox.shared.handle"))
+    }
+
     func testAPNsTokenUsesLowercaseHexadecimalEncoding() {
         XCTAssertEqual(NotificationManager.hexToken(Data([0x00, 0x0f, 0xa5, 0xff])), "000fa5ff")
     }

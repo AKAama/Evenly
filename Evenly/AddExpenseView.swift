@@ -24,6 +24,10 @@ struct AddExpenseView: View {
     @State private var selectedPresetGroupId: String = "餐饮"
     @State private var selectedCategory: String?
     @State private var selectedIcon: ExpenseIcon?
+    @State private var selectedKind: ExpenseKind = .expense
+    /// When recording an expense, optionally also create a linked income (same participants).
+    @State private var alsoRecordLinkedIncome = false
+    @State private var linkedIncomeText = ""
     @State private var isPeoplePickerPresented = false
     @State private var isIconPickerPresented = false
     @StateObject private var voiceSession = VoiceExpenseStreamingSession()
@@ -32,7 +36,18 @@ struct AddExpenseView: View {
     private enum InputField: Hashable {
         case title
         case amount
+        case linkedIncome
     }
+
+    /// Parent can create a linked cost+income pair without a separate “category” screen.
+    var onSaveCompound: (@MainActor (
+        _ title: String,
+        _ cost: Decimal,
+        _ income: Decimal,
+        _ payer: Person,
+        _ receiver: Person,
+        _ members: [Person]
+    ) async -> Result<Void, Error>)?
 
     private var primaryBlue: Color {
         EvenlyStyle.brandBlueAccent
@@ -125,13 +140,29 @@ struct AddExpenseView: View {
         "打车 78，Tristan付的，我和Tristan各 39",
     ]
 
-    init(expense: Expense? = nil, participants: [Person], currentUserId: String? = nil, ledgerId: UUID? = nil, onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>) {
+    init(
+        expense: Expense? = nil,
+        participants: [Person],
+        currentUserId: String? = nil,
+        ledgerId: UUID? = nil,
+        onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>,
+        onSaveCompound: (@MainActor (
+            _ title: String,
+            _ cost: Decimal,
+            _ income: Decimal,
+            _ payer: Person,
+            _ receiver: Person,
+            _ members: [Person]
+        ) async -> Result<Void, Error>)? = nil
+    ) {
         self.participants = participants
         self.currentUserId = currentUserId
         self.ledgerId = ledgerId
         self.onSave = onSave
+        self.onSaveCompound = onSaveCompound
         self.existingId = expense?.id
         _title = State(initialValue: expense?.title ?? "")
+        _selectedKind = State(initialValue: expense?.kind ?? .expense)
         _selectedCategory = State(initialValue: expense?.category)
         _selectedIcon = State(initialValue: expense?.icon)
         if let preset = expense.flatMap({ ExpenseCategoryCatalog.preset(named: $0.title) }) {
@@ -181,10 +212,11 @@ struct AddExpenseView: View {
                 .ignoresSafeArea()
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selectedParticipantIds.count)
-            .navigationTitle(existingId == nil ? "新建账单" : "编辑账单")
+            .navigationTitle(existingId == nil ? "新建\(selectedKind.displayName)" : "编辑\(selectedKind.displayName)")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPeoplePickerPresented) {
                 ExpensePeoplePickerView(
+                    kind: selectedKind,
                     participants: participants,
                     selectedPayerId: $selectedPayerId,
                     selectedParticipantIds: $selectedParticipantIds
@@ -257,12 +289,35 @@ struct AddExpenseView: View {
 
     private var headerCard: some View {
         VStack(spacing: 14) {
+            // Same type language as list/detail chips.
             HStack {
-                Label("这笔花了", systemImage: "sparkles")
+                Picker("类型", selection: $selectedKind) {
+                    ForEach(ExpenseKind.allCases, id: \.self) { kind in
+                        Text(kind.displayName).tag(kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(existingId != nil) // editing keeps original kind
+                .onChange(of: selectedKind) { _, newKind in
+                    HapticManager.selectionChanged()
+                    if newKind.isIncome {
+                        alsoRecordLinkedIncome = false
+                    }
+                }
+                if existingId != nil {
+                    ExpenseKindChip(kind: selectedKind)
+                }
+            }
+
+            HStack {
+                Label(
+                    selectedKind.isIncome ? "金额" : "金额",
+                    systemImage: selectedKind.isIncome ? "arrow.down.circle" : "yensign.circle"
+                )
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if existingId == nil, ledgerId != nil {
+                if existingId == nil, ledgerId != nil, !selectedKind.isIncome {
                     voiceIconButton
                 }
                 if let selectedIcon {
@@ -271,21 +326,30 @@ struct AddExpenseView: View {
                         Text(selectedCategory ?? selectedPreset?.name ?? "自定义")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(primaryBlue)
+                    .foregroundStyle(ExpenseChrome.accent(for: selectedKind))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(primaryBlue.opacity(colorScheme == .dark ? 0.18 : 0.1), in: Capsule())
+                    .background(
+                        ExpenseChrome.accent(for: selectedKind).opacity(colorScheme == .dark ? 0.18 : 0.1),
+                        in: Capsule()
+                    )
                 }
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if selectedKind.isIncome {
+                    Text("+")
+                        .font(.system(size: 34, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.green)
+                }
                 Text("¥")
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(selectedKind.isIncome ? Color.green.opacity(0.7) : Color.secondary)
                 TextField("0.00", text: $amountText)
                     .keyboardType(.decimalPad)
                     .focused($focusedField, equals: .amount)
                     .font(.system(size: 56, weight: .bold, design: .rounded))
+                    .foregroundStyle(ExpenseChrome.amountColor(for: selectedKind))
                     .minimumScaleFactor(0.55)
                     .lineLimit(1)
                     .onChange(of: amountText) { _, newValue in
@@ -322,6 +386,41 @@ struct AddExpenseView: View {
             .padding(.vertical, 12)
             .background(controlFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
+            // Subtle: not a special bill type — just “also record money coming back”.
+            if existingId == nil, !selectedKind.isIncome, onSaveCompound != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(isOn: $alsoRecordLinkedIncome.animation(EvenlyMotion.press)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("同时记一笔收入")
+                                .font(.subheadline.weight(.semibold))
+                            Text("同一批人、同一标题；适合垫付后又收回/中奖等")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(EvenlyStyle.brandBlue)
+
+                    if alsoRecordLinkedIncome {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("收入 ¥")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            TextField("0.00", text: $linkedIncomeText)
+                                .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .linkedIncome)
+                                .font(.title3.weight(.semibold))
+                                .onChange(of: linkedIncomeText) { _, newValue in
+                                    linkedIncomeText = formatAmountInput(newValue)
+                                }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(controlFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+                .padding(.top, 2)
+            }
+
             if let voiceText = voiceTranscriptText {
                 Text(voiceText)
                     .font(.caption)
@@ -333,7 +432,11 @@ struct AddExpenseView: View {
             }
 
             HStack {
-                Text(splitAmountText.map { "约 ¥\($0) / 人" } ?? "先填金额，再选择谁一起分")
+                Text(
+                    splitAmountText.map {
+                        selectedKind.isIncome ? "约每人应得 ¥\($0)" : "约 ¥\($0) / 人"
+                    } ?? (selectedKind.isIncome ? "先填金额，再选择谁一起分" : "先填金额，再选择谁一起分")
+                )
                 Spacer()
                 Button {
                     focusedField = .amount
@@ -466,10 +569,14 @@ struct AddExpenseView: View {
                         .frame(width: 30, height: 30)
                         .background(primaryBlue.opacity(colorScheme == .dark ? 0.18 : 0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("付款与参与人")
+                        Text(selectedKind.isIncome ? "收款与参与人" : "付款与参与人")
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        Text("付款人：\(selectedPayer?.name ?? "未选择")")
+                        Text(
+                            selectedKind.isIncome
+                                ? "收款人：\(selectedPayer?.name ?? "未选择")"
+                                : "付款人：\(selectedPayer?.name ?? "未选择")"
+                        )
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -631,8 +738,12 @@ struct AddExpenseView: View {
     private func participantStatusText(_ participant: Person, isSelected: Bool, isLocked: Bool) -> String {
         if participant.isPending { return "邀请中" }
         if participant.isTemporary { return "临时成员" }
-        if isLocked { return "付款人，必须参与" }
-        return isSelected ? "已参与分摊" : "点按加入分摊"
+        if isLocked {
+            return selectedKind.isIncome ? "收款人，必须参与" : "付款人，必须参与"
+        }
+        return isSelected
+            ? (selectedKind.isIncome ? "已参与分配" : "已参与分摊")
+            : (selectedKind.isIncome ? "点按加入分配" : "点按加入分摊")
     }
 
     private func initials(for participant: Person) -> String {
@@ -702,6 +813,9 @@ struct AddExpenseView: View {
               amount > 0 else {
             return false
         }
+        if alsoRecordLinkedIncome, !selectedKind.isIncome {
+            guard let income = Decimal(string: linkedIncomeText), income > 0 else { return false }
+        }
         return true
     }
 
@@ -736,10 +850,42 @@ struct AddExpenseView: View {
         errorMessage = nil
         isSaving = true
 
+        // Linked income uses the same people; receiver defaults to the expense payer.
+        if alsoRecordLinkedIncome,
+           !selectedKind.isIncome,
+           existingId == nil,
+           let income = Decimal(string: linkedIncomeText),
+           income > 0,
+           let onSaveCompound {
+            Task {
+                let result = await onSaveCompound(
+                    title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    amount,
+                    income,
+                    payer,
+                    payer,
+                    Array(selectedParticipants)
+                )
+                await MainActor.run {
+                    isSaving = false
+                    switch result {
+                    case .success:
+                        HapticManager.notificationOccurred(.success)
+                        dismiss()
+                    case .failure(let error):
+                        HapticManager.notificationOccurred(.error)
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            }
+            return
+        }
+
         let expense = Expense(
             id: existingId ?? UUID(),
             title: title,
             amount: amount,
+            kind: selectedKind,
             payer: payer,
             participants: Array(selectedParticipants),
             category: selectedCategory,
@@ -912,6 +1058,7 @@ private struct ExpensePeoplePickerView: View {
         EvenlyStyle.avatarBlueFill(colorScheme, selected: true)
     }
 
+    let kind: ExpenseKind
     let participants: [Person]
     @Binding var selectedPayerId: UUID?
     @Binding var selectedParticipantIds: Set<UUID>
@@ -954,7 +1101,7 @@ private struct ExpensePeoplePickerView: View {
                 }
                 .ignoresSafeArea()
             }
-            .navigationTitle("付款与参与人")
+            .navigationTitle(kind.isIncome ? "收款与参与人" : "付款与参与人")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -987,7 +1134,12 @@ private struct ExpensePeoplePickerView: View {
     private var pickerStatusHeader: some View {
         HStack(spacing: 12) {
             summaryPill(icon: "person.2.fill", text: "\(selectedParticipantIds.count) 人参与")
-            summaryPill(icon: "creditcard.fill", text: selectedPayer.map { "\($0.name) 付款" } ?? "未选付款人")
+            summaryPill(
+                icon: "creditcard.fill",
+                text: selectedPayer.map {
+                    kind.isIncome ? "\($0.name) 收款" : "\($0.name) 付款"
+                } ?? (kind.isIncome ? "未选收款人" : "未选付款人")
+            )
         }
     }
 
@@ -1089,7 +1241,7 @@ private struct ExpensePeoplePickerView: View {
                 HapticManager.selection.selectionChanged()
             } label: {
                 if isPayer {
-                    Label("付款人", systemImage: "creditcard.fill")
+                    Label(kind.isIncome ? "收款人" : "付款人", systemImage: "creditcard.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(primaryBlue)
                         .padding(.horizontal, 10)
@@ -1180,7 +1332,9 @@ private struct ExpensePeoplePickerView: View {
 
     private func participantSubtitle(_ participant: Person, isSelected: Bool) -> String {
         if participant.isPending { return "邀请中" }
-        if selectedPayerId == participant.id { return "付款人" }
+        if selectedPayerId == participant.id {
+            return kind.isIncome ? "收款人" : "付款人"
+        }
         if participant.isTemporary { return isSelected ? "已参与 · 临时" : "临时" }
         return isSelected ? "已参与" : "未参与"
     }

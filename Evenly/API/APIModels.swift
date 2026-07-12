@@ -269,6 +269,50 @@ struct LedgerOverviewResponse: Decodable {
     }
 }
 
+struct LedgerInviteLinkResponse: Decodable {
+    let token: String
+    let url: String
+    let ledgerId: String
+    let ledgerName: String
+    let createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case token, url
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case createdAt = "created_at"
+    }
+}
+
+struct LedgerInvitePreviewResponse: Decodable {
+    let token: String
+    let ledgerId: String
+    let ledgerName: String
+    let ownerName: String
+    let valid: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case token, valid
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case ownerName = "owner_name"
+    }
+}
+
+struct JoinLedgerResponse: Decodable {
+    let ledgerId: String
+    let ledgerName: String
+    let status: String
+    let memberId: String
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case memberId = "member_id"
+    }
+}
+
 // MARK: - Member Models
 
 struct AddMemberRequest: Encodable {
@@ -353,6 +397,7 @@ struct LedgerInvitationResponse: Decodable, Identifiable {
 struct ExpenseCreate: Encodable {
     let title: String
     let totalAmount: Decimal
+    let kind: String
     let payerId: String
     let splits: [ExpenseSplitCreate]
     let note: String?
@@ -364,6 +409,7 @@ struct ExpenseCreate: Encodable {
     enum CodingKeys: String, CodingKey {
         case title
         case totalAmount = "total_amount"
+        case kind
         case payerId = "payer_id"
         case splits
         case note
@@ -393,6 +439,8 @@ struct ExpenseResponse: Decodable, Identifiable {
     let createdBy: String
     let title: String
     let totalAmount: Decimal
+    let kind: String?
+    let groupId: String?
     let note: String?
     let expenseDate: Date?
     let status: String
@@ -409,6 +457,8 @@ struct ExpenseResponse: Decodable, Identifiable {
         case createdBy = "created_by"
         case title
         case totalAmount = "total_amount"
+        case kind
+        case groupId = "group_id"
         case note
         case expenseDate = "expense_date"
         case status
@@ -427,6 +477,8 @@ struct ExpenseResponse: Decodable, Identifiable {
         createdBy = try container.decode(String.self, forKey: .createdBy)
         title = try container.decode(String.self, forKey: .title)
         totalAmount = try container.decodeFlexibleDecimal(forKey: .totalAmount)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         note = try container.decodeIfPresent(String.self, forKey: .note)
         expenseDate = try container.decodeIfPresent(Date.self, forKey: .expenseDate)
         status = try container.decode(String.self, forKey: .status)
@@ -445,6 +497,8 @@ struct ExpenseWithDetails: Decodable, Identifiable {
     let createdBy: String
     let title: String
     let totalAmount: Decimal
+    let kind: String?
+    let groupId: String?
     let note: String?
     let expenseDate: Date?
     let status: String
@@ -464,6 +518,8 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         case createdBy = "created_by"
         case title
         case totalAmount = "total_amount"
+        case kind
+        case groupId = "group_id"
         case note
         case expenseDate = "expense_date"
         case status
@@ -485,6 +541,8 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         createdBy = try container.decode(String.self, forKey: .createdBy)
         title = try container.decode(String.self, forKey: .title)
         totalAmount = try container.decodeFlexibleDecimal(forKey: .totalAmount)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         note = try container.decodeIfPresent(String.self, forKey: .note)
         expenseDate = try container.decodeIfPresent(Date.self, forKey: .expenseDate)
         status = try container.decode(String.self, forKey: .status)
@@ -496,6 +554,44 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         payer = try container.decode(UserResponse.self, forKey: .payer)
         splits = try container.decode([ExpenseSplitResponse].self, forKey: .splits)
         confirmations = try container.decode([ExpenseConfirmationResponse].self, forKey: .confirmations)
+    }
+}
+
+struct CompoundExpenseCreate: Encodable {
+    let title: String
+    let expenseDate: String
+    let note: String?
+    let category: String?
+    let iconType: String?
+    let iconValue: String?
+    let participantMemberIds: [String]
+    let costAmount: Decimal
+    let costPayerId: String
+    let incomeAmount: Decimal
+    let incomeReceiverId: String
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case expenseDate = "expense_date"
+        case note, category
+        case iconType = "icon_type"
+        case iconValue = "icon_value"
+        case participantMemberIds = "participant_member_ids"
+        case costAmount = "cost_amount"
+        case costPayerId = "cost_payer_id"
+        case incomeAmount = "income_amount"
+        case incomeReceiverId = "income_receiver_id"
+    }
+}
+
+struct CompoundExpenseResponse: Decodable {
+    let groupId: String
+    let cost: ExpenseResponse
+    let income: ExpenseResponse
+
+    enum CodingKeys: String, CodingKey {
+        case groupId = "group_id"
+        case cost, income
     }
 }
 

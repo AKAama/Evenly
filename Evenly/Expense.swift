@@ -7,10 +7,27 @@
 
 import Foundation
 
+enum ExpenseKind: String, Codable, CaseIterable {
+    case expense
+    case income
+
+    var isIncome: Bool { self == .income }
+
+    var displayName: String {
+        switch self {
+        case .expense: return "支出"
+        case .income: return "收入"
+        }
+    }
+}
+
 struct Expense: Identifiable, Codable {
     let id: UUID
     var title: String
     var amount: Decimal
+    var kind: ExpenseKind
+    /// Links cost+income (or multi-part) rows that UI shows as one bill.
+    var groupId: UUID?
     var payer: Person
     var participants: [Person]
     var status: ExpenseStatus
@@ -28,6 +45,8 @@ struct Expense: Identifiable, Codable {
         id: UUID = UUID(),
         title: String,
         amount: Decimal,
+        kind: ExpenseKind = .expense,
+        groupId: UUID? = nil,
         payer: Person,
         participants: [Person],
         status: ExpenseStatus = .pending,
@@ -43,6 +62,8 @@ struct Expense: Identifiable, Codable {
         self.id = id
         self.title = title
         self.amount = amount
+        self.kind = kind
+        self.groupId = groupId
         self.payer = payer
         self.participants = participants
         self.status = status
@@ -61,6 +82,8 @@ struct Expense: Identifiable, Codable {
         self.id = UUID(uuidString: response.id) ?? UUID()
         self.title = response.title
         self.amount = response.totalAmount
+        self.kind = ExpenseKind(rawValue: response.kind ?? "expense") ?? .expense
+        self.groupId = response.groupId.flatMap(UUID.init(uuidString:))
         self.payer = participants.first { $0.userId == response.payerId } ?? Person(name: response.payer.displayName ?? "Unknown", userId: response.payerId)
         let splitUserIds = Set(response.splits.compactMap(\.userId))
         // Compare member ids as UUIDs: the backend serializes them as lowercase
@@ -98,6 +121,8 @@ struct Expense: Identifiable, Codable {
         self.id = UUID(uuidString: response.id) ?? UUID()
         self.title = response.title
         self.amount = response.totalAmount
+        self.kind = ExpenseKind(rawValue: response.kind ?? "expense") ?? .expense
+        self.groupId = response.groupId.flatMap(UUID.init(uuidString:))
         self.payer = participants.first { $0.userId == response.payerId } ?? Person(name: "Unknown", userId: response.payerId)
         self.participants = participants
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
@@ -116,12 +141,75 @@ struct Expense: Identifiable, Codable {
             ? [response.createdBy: .confirmed]
             : [:]
     }
-    
+
+    /// Group cost+income rows for list UI (same group_id, order: expense then income).
+    static func listItems(from expenses: [Expense]) -> [ExpenseListItem] {
+        var seenGroups = Set<UUID>()
+        var items: [ExpenseListItem] = []
+        // Preserve chronological order of first appearance.
+        for expense in expenses {
+            if let gid = expense.groupId {
+                if seenGroups.contains(gid) { continue }
+                seenGroups.insert(gid)
+                let peers = expenses.filter { $0.groupId == gid }
+                    .sorted { lhs, rhs in
+                        if lhs.kind != rhs.kind { return lhs.kind == .expense }
+                        return (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
+                    }
+                if peers.count >= 2 {
+                    items.append(.group(id: gid, expenses: peers))
+                } else if let only = peers.first {
+                    items.append(.single(only))
+                }
+            } else {
+                items.append(.single(expense))
+            }
+        }
+        return items
+    }
+
     /// 获取特定成员的确认状态
     func confirmationStatus(for person: Person) -> ConfirmationStatus {
         guard let userId = person.userId else { return .pending }
         return confirmations[userId] ?? .pending
     }
+}
+
+enum ExpenseListItem: Identifiable {
+    case single(Expense)
+    case group(id: UUID, expenses: [Expense])
+
+    var id: String {
+        switch self {
+        case .single(let e): return e.id.uuidString
+        case .group(let id, _): return "group-\(id.uuidString)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .single(let e): return e.title
+        case .group(_, let expenses): return expenses.first?.title ?? "组合账单"
+        }
+    }
+
+    var representative: Expense {
+        switch self {
+        case .single(let e): return e
+        case .group(_, let expenses):
+            return expenses.first(where: { $0.kind == .expense }) ?? expenses[0]
+        }
+    }
+
+    var allExpenses: [Expense] {
+        switch self {
+        case .single(let e): return [e]
+        case .group(_, let expenses): return expenses
+        }
+    }
+
+    var cost: Expense? { allExpenses.first { $0.kind == .expense } }
+    var income: Expense? { allExpenses.first { $0.kind == .income } }
 }
 
 enum ConfirmationStatus: String, Codable {
@@ -156,6 +244,7 @@ extension Expense {
         return ExpenseCreate(
             title: title,
             totalAmount: amount,
+            kind: kind.rawValue,
             payerId: payerId,
             splits: splits,
             note: note,
@@ -164,6 +253,11 @@ extension Expense {
             iconType: icon?.type.rawValue,
             iconValue: icon?.value
         )
+    }
+
+    /// Same payload shape as create — backend treats PUT as full replace.
+    func toUpdateRequest(payerId: String) -> ExpenseCreate {
+        toCreateRequest(payerId: payerId, ledgerId: UUID())
     }
 
     private static let requestDateFormatter: DateFormatter = {

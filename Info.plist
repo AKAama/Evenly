@@ -28,6 +28,17 @@
 	<string>用于语音输入账单内容</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>cn.evenly.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>evenly</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

@@ -99,8 +99,9 @@ final class GuestLedgerStore: ObservableObject {
         var balances = Dictionary(uniqueKeysWithValues: ledger.participants.map { ($0.id, Decimal.zero) })
         for expense in ledger.expenses where !expense.participants.isEmpty {
             let count = Decimal(expense.participants.count)
-            let share = expense.amount / count
-            balances[expense.payer.id, default: 0] += expense.amount
+            let net = expense.netAmount
+            let share = net / count
+            balances[expense.payer.id, default: 0] += net
             for participant in expense.participants {
                 balances[participant.id, default: 0] -= share
             }
@@ -372,7 +373,7 @@ struct GuestModeView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Text(currency(expense.amount))
+                                Text(currency(expense.netAmount))
                                     .font(.headline)
                                 Image(systemName: "chevron.right")
                                     .font(.caption.bold())
@@ -392,7 +393,7 @@ struct GuestModeView: View {
     }
 
     private func guestOverviewCard(_ ledger: Ledger) -> some View {
-        let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.amount }
+        let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.netAmount }
         return HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 Label("本地总支出", systemImage: "lock.fill")

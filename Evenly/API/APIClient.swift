@@ -20,18 +20,48 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "Invalid URL"
+            return "地址无效"
         case .invalidResponse:
-            return "Invalid response from server"
+            return "服务器响应异常"
         case .unauthorized:
-            return "Please login again"
+            return "请重新登录"
         case .serverError(let code, let detail):
-            return detail ?? "Server error: \(code)"
+            return detail ?? "服务器错误（\(code)）"
         case .decodingError:
-            return "Failed to parse response"
+            return "服务器返回数据无法解析"
         case .networkError(let error):
-            return error.localizedDescription
+            return Self.friendlyNetworkMessage(for: error)
         }
+    }
+
+    /// Map CFNetwork / URLSession noise (e.g. voice WebSocket upgrade failures) to actionable Chinese copy.
+    static func friendlyNetworkMessage(for error: Error) -> String {
+        let ns = error as NSError
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .badServerResponse: // -1011 — typical when WS upgrade gets HTTP 4xx/5xx/HTML
+                return "语音通道连接失败：网关可能未开启 WebSocket（请检查 Nginx 的 Upgrade 配置）"
+            case .timedOut:
+                return "连接超时，请检查网络后重试"
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "网络不可用，请检查网络后重试"
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return "无法连接到服务器"
+            case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate:
+                return "安全连接失败，请检查证书配置"
+            default:
+                break
+            }
+        }
+        // Some stacks surface -1011 only as NSError domain/code.
+        if ns.domain == NSURLErrorDomain, ns.code == URLError.badServerResponse.rawValue {
+            return "语音通道连接失败：网关可能未开启 WebSocket（请检查 Nginx 的 Upgrade 配置）"
+        }
+        let text = error.localizedDescription
+        if text.localizedCaseInsensitiveContains("bad response from the server") {
+            return "语音通道连接失败：网关可能未开启 WebSocket（请检查 Nginx 的 Upgrade 配置）"
+        }
+        return text
     }
 
     static func server(statusCode: Int, data: Data) -> APIError {
@@ -333,6 +363,10 @@ final class APIClient: ObservableObject {
 
     func put<T: Decodable>(_ endpoint: String, body: Encodable? = nil, requiresAuth: Bool = true) async throws -> T {
         try await request(endpoint: endpoint, method: .put, body: body, requiresAuth: requiresAuth)
+    }
+
+    func patch<T: Decodable>(_ endpoint: String, body: Encodable? = nil, requiresAuth: Bool = true) async throws -> T {
+        try await request(endpoint: endpoint, method: .patch, body: body, requiresAuth: requiresAuth)
     }
 
     func delete(_ endpoint: String, requiresAuth: Bool = true) async throws {

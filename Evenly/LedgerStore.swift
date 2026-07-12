@@ -646,85 +646,6 @@ final class LedgerStore: ObservableObject {
         }
     }
 
-    /// Cost + income in one shot (e.g. lottery). Returns both rows; list groups by group_id.
-    func addCompoundExpense(
-        title: String,
-        costAmount: Decimal,
-        incomeAmount: Decimal,
-        costPayer: Person,
-        incomeReceiver: Person,
-        participants: [Person],
-        to ledger: Ledger,
-        note: String? = nil,
-        category: String? = nil,
-        icon: ExpenseIcon? = nil,
-        completion: @escaping (Result<(cost: Expense, income: Expense), Error>) -> Void
-    ) {
-        guard userId != nil else {
-            completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
-            return
-        }
-        guard let costPayerId = ledger.registeredUserId(for: costPayer),
-              let incomeReceiverId = ledger.registeredUserId(for: incomeReceiver) else {
-            completion(.failure(NSError(domain: "LedgerStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "付款人/收款人必须是已注册成员"])))
-            return
-        }
-        let memberIds = participants.map { $0.id.uuidString }
-        guard !memberIds.isEmpty else {
-            completion(.failure(NSError(domain: "LedgerStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "请选择参与人"])))
-            return
-        }
-
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-
-        let body = CompoundExpenseCreate(
-            title: title,
-            expenseDate: formatter.string(from: Date()),
-            note: note,
-            category: category,
-            iconType: icon?.type.rawValue,
-            iconValue: icon?.value,
-            participantMemberIds: memberIds,
-            costAmount: costAmount,
-            costPayerId: costPayerId,
-            incomeAmount: incomeAmount,
-            incomeReceiverId: incomeReceiverId
-        )
-
-        Task {
-            do {
-                let response: CompoundExpenseResponse = try await api.post(
-                    APIEndpoints.compoundExpense(ledgerId: ledger.id.uuidString),
-                    body: body
-                )
-                var cost = Expense(from: response.cost, participants: participants)
-                var income = Expense(from: response.income, participants: participants)
-                if cost.icon == nil { cost.icon = icon }
-                if income.icon == nil { income.icon = icon }
-                if cost.category == nil { cost.category = category }
-                if income.category == nil { income.category = category }
-
-                await MainActor.run {
-                    if var updated = self.currentLedger, updated.id == ledger.id {
-                        updated.expenses.insert(contentsOf: [cost, income], at: 0)
-                        updated.expenseCount = updated.expenses.count
-                        self.currentLedger = updated
-                        if let idx = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
-                            self.ledgers[idx] = updated
-                        }
-                    }
-                    completion(.success((cost, income)))
-                }
-            } catch {
-                await MainActor.run { completion(.failure(error)) }
-            }
-        }
-    }
-
     func addExpense(_ expense: Expense, to ledger: Ledger, completion: @escaping (Result<Expense, Error>) -> Void) {
         guard userId != nil else {
             completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
@@ -770,6 +691,39 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     completion(.failure(error))
                 }
+            }
+        }
+    }
+
+    /// Record a partial refund against an expense (creator or payer).
+    func setRefund(
+        for expense: Expense,
+        amount: Decimal,
+        note: String? = nil,
+        in ledger: Ledger,
+        completion: @escaping (Result<Expense, Error>) -> Void
+    ) {
+        guard userId != nil else {
+            completion(.failure(NSError(domain: "LedgerStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
+            return
+        }
+        Task {
+            do {
+                let body = ExpenseRefundRequest(refundAmount: amount, note: note)
+                let response: ExpenseResponse = try await api.patch(
+                    APIEndpoints.expenseRefund(expenseId: expense.id.uuidString),
+                    body: body
+                )
+                var updated = Expense(from: response, participants: expense.participants)
+                if updated.icon == nil { updated.icon = expense.icon }
+                if updated.category == nil { updated.category = expense.category }
+                updated.confirmations = expense.confirmations
+                await MainActor.run {
+                    self.replaceExpense(updated, in: ledger.id)
+                    completion(.success(updated))
+                }
+            } catch {
+                await MainActor.run { completion(.failure(error)) }
             }
         }
     }

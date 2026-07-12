@@ -385,6 +385,16 @@ struct ContentView: View {
                     currentUserId: auth.user?.id,
                     onEdit: {
                         sheetType = .editExpense(expense, ledger)
+                    },
+                    onSetRefund: { amount, note in
+                        await withCheckedContinuation { continuation in
+                            ledgerStore.setRefund(for: expense, amount: amount, note: note, in: ledger) { result in
+                                if case .success = result {
+                                    loadSettlementData(for: ledger)
+                                }
+                                continuation.resume(returning: result)
+                            }
+                        }
                     }
                 )
             }
@@ -400,27 +410,6 @@ struct ContentView: View {
                 ledgerId: ledger.id,
                 onSave: { newExpense in
                     await submitAddExpense(newExpense, to: ledger)
-                },
-                onSaveCompound: { title, cost, income, costPayer, incomeReceiver, members in
-                    await withCheckedContinuation { continuation in
-                        ledgerStore.addCompoundExpense(
-                            title: title,
-                            costAmount: cost,
-                            incomeAmount: income,
-                            costPayer: costPayer,
-                            incomeReceiver: incomeReceiver,
-                            participants: members,
-                            to: ledger
-                        ) { result in
-                            switch result {
-                            case .success:
-                                loadSettlementData(for: ledger)
-                                continuation.resume(returning: .success(()))
-                            case .failure(let error):
-                                continuation.resume(returning: .failure(error))
-                            }
-                        }
-                    }
                 }
             )
         }
@@ -739,7 +728,6 @@ struct ContentView: View {
     @ViewBuilder
     private func expenseListSection(_ ledger: Ledger) -> some View {
         let expenses = filteredExpenses(for: ledger)
-        let items = Expense.listItems(from: expenses)
         Section {
             if ledger.expenses.isEmpty {
                 if ledgerStore.isLoadingCurrentDetail {
@@ -755,87 +743,12 @@ struct ContentView: View {
             } else if expenses.isEmpty {
                 noMatchingExpensesPlaceholder
             } else {
-                ForEach(items) { item in
-                    switch item {
-                    case .single(let expense):
-                        expenseListRow(expense, ledger: ledger)
-                    case .group(_, let groupExpenses):
-                        expenseGroupListRow(groupExpenses, ledger: ledger)
-                    }
+                ForEach(expenses) { expense in
+                    expenseListRow(expense, ledger: ledger)
                 }
             }
         } header: {
-            // Count user-facing cards (grouped cost+income counts as one).
-            expenseSectionHeader(count: items.count)
-        }
-    }
-
-    private func expenseGroupListRow(_ expenses: [Expense], ledger: Ledger) -> some View {
-        let item = ExpenseListItem.group(id: expenses.first?.groupId ?? UUID(), expenses: expenses)
-        let cost = item.cost
-        let income = item.income
-        let primary = item.representative
-        let peer = (primary.kind == .expense ? income : cost)
-        return VStack(alignment: .leading, spacing: 8) {
-            ExpenseUnifiedListRow(expense: primary, linkedPeer: peer)
-            ForEach(expenses.filter { canRespond(to: $0) }) { expense in
-                HStack {
-                    ExpenseKindChip(kind: expense.kind)
-                    Spacer()
-                    Button {
-                        HapticManager.impact(.medium, intensity: 0.9)
-                        respond(to: expense, with: .confirmed, in: ledger)
-                    } label: {
-                        Text("确认\(expense.kind.displayName)")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(respondingExpenseIds.contains(expense.id))
-                }
-            }
-        }
-        .padding(.vertical, 2)
-        .listRowAnimation()
-        .contentShape(Rectangle())
-        .onTapGesture {
-            openExpenseDetail(primary, in: ledger)
-        }
-        .contextMenu {
-            Button { openExpenseDetail(primary, in: ledger) } label: {
-                Label("查看详情", systemImage: "info.circle")
-            }
-            if let cost, canEditExpense(cost) {
-                Button { openEditExpense(cost, in: ledger) } label: {
-                    Label("编辑支出", systemImage: "pencil")
-                }
-            }
-            if let income, canEditExpense(income) {
-                Button { openEditExpense(income, in: ledger) } label: {
-                    Label("编辑收入", systemImage: "pencil")
-                }
-            }
-            if primary.createdBy == auth.user?.id {
-                Divider()
-                Button(role: .destructive) {
-                    prepareToDeleteExpense(cost ?? primary, in: ledger)
-                } label: {
-                    Label("删除", systemImage: "trash")
-                }
-            }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            if let first = expenses.first(where: { canRespond(to: $0) }) {
-                Button {
-                    HapticManager.impact(.medium, intensity: 0.95)
-                    respond(to: first, with: .confirmed, in: ledger)
-                } label: {
-                    Label("确认", systemImage: "checkmark.circle.fill")
-                }
-                .tint(.green)
-            }
-        }
-        .evenlyDestructiveSwipe(enabled: primary.createdBy == auth.user?.id) {
-            prepareToDeleteExpense(cost ?? primary, in: ledger)
+            expenseSectionHeader(count: expenses.count)
         }
     }
 
@@ -1050,7 +963,7 @@ struct ContentView: View {
     }
 
     private func ledgerOverviewCard(_ ledger: Ledger) -> some View {
-        let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.amount }
+        let total = ledger.expenses.reduce(Decimal.zero) { $0 + $1.netAmount }
         return HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("账本总支出")
@@ -1282,12 +1195,11 @@ struct ContentView: View {
 
         for expense in ledger.expenses {
             if expense.participants.isEmpty { continue }
-            // Income inverts signs (receiver held money; participants are entitled to shares).
-            let sign: Decimal = expense.kind.isIncome ? -1 : 1
-            let share = expense.amount / Decimal(expense.participants.count)
-            balances[expense.payer, default: 0] += sign * expense.amount
+            let net = expense.netAmount
+            let share = net / Decimal(expense.participants.count)
+            balances[expense.payer, default: 0] += net
             for participant in expense.participants {
-                balances[participant, default: 0] -= sign * share
+                balances[participant, default: 0] -= share
             }
         }
 

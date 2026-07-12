@@ -80,27 +80,37 @@ struct ExpenseDetailView: View {
     let ledger: Ledger
     var currentUserId: String? = nil
     var onEdit: (() -> Void)? = nil
+    var onSetRefund: ((Decimal, String?) async -> Result<Expense, Error>)? = nil
+
+    @State private var showRefundSheet = false
+    @State private var refundText = ""
+    @State private var refundNote = ""
+    @State private var isSavingRefund = false
+    @State private var refundError: String?
+    @State private var displayedExpense: Expense?
+
+    private var current: Expense { displayedExpense ?? expense }
 
     private var canEdit: Bool {
-        expense.status == .pending && expense.createdBy == currentUserId
+        current.status == .pending && current.createdBy == currentUserId
     }
 
-    private var groupPeers: [Expense] {
-        guard let gid = expense.groupId else { return [expense] }
-        let peers = ledger.expenses.filter { $0.groupId == gid }
-        return peers.isEmpty ? [expense] : peers
+    private var canRefund: Bool {
+        current.status != .rejected
+            && onSetRefund != nil
+            && (current.createdBy == currentUserId || current.payer.userId == currentUserId)
     }
 
     var body: some View {
         List {
             Section {
-                ExpenseDetailHeader(expense: expense, ledgerExpenses: ledger.expenses)
+                ExpenseDetailHeader(expense: current)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
 
-            if let note = expense.note, !note.isEmpty {
+            if let note = current.note, !note.isEmpty {
                 Section("备注") {
                     Text(note)
                         .font(.body)
@@ -108,25 +118,8 @@ struct ExpenseDetailView: View {
                 }
             }
 
-            // Linked pair: show both legs with same chrome as list rows.
-            if groupPeers.count > 1 {
-                Section {
-                    ForEach(groupPeers.sorted { lhs, rhs in
-                        if lhs.kind != rhs.kind { return lhs.kind == .expense }
-                        return false
-                    }) { leg in
-                        ExpenseUnifiedListRow(expense: leg)
-                            .padding(.vertical, 2)
-                    }
-                } header: {
-                    Text("明细")
-                } footer: {
-                    Text("关联记账会拆成支出与收入两笔明细，结算按两笔一起计算。")
-                }
-            }
-
             Section("参与成员") {
-                ForEach(expense.participants) { participant in
+                ForEach(current.participants) { participant in
                     HStack(spacing: 12) {
                         RemoteAvatarView(
                             avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
@@ -136,8 +129,8 @@ struct ExpenseDetailView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(participant.name)
                                 .font(.body)
-                            if participant.userId == expense.payer.userId {
-                                Text(ExpenseChrome.roleLabel(for: expense.kind))
+                            if participant.userId == current.payer.userId {
+                                Text("付款人")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -149,22 +142,41 @@ struct ExpenseDetailView: View {
                 }
             }
 
-            if canEdit {
+            if canRefund || canEdit {
                 Section {
-                    Button {
-                        HapticManager.impact(.medium)
-                        onEdit?()
-                    } label: {
-                        Label("编辑账单", systemImage: "pencil")
+                    if canRefund {
+                        Button {
+                            refundText = current.refundAmount > 0
+                                ? NSDecimalNumber(decimal: current.refundAmount).stringValue
+                                : ""
+                            refundNote = ""
+                            refundError = nil
+                            showRefundSheet = true
+                            HapticManager.impact(.light)
+                        } label: {
+                            Label(
+                                current.hasRefund ? "修改退款" : "记录退款",
+                                systemImage: "arrow.uturn.backward.circle"
+                            )
                             .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if canEdit {
+                        Button {
+                            HapticManager.impact(.medium)
+                            onEdit?()
+                        } label: {
+                            Label("编辑账单", systemImage: "pencil")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 } footer: {
-                    Text("仅待确认账单可由创建者编辑。保存后其他人需重新确认。")
+                    Text("退款会冲减这笔支出（例如住宿 600、退 100 → 实付 500），原价保留。创建者或付款人可记录。")
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(expense.kind.displayName)
+        .navigationTitle("账单详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canEdit {
@@ -173,6 +185,83 @@ struct ExpenseDetailView: View {
                         HapticManager.impact(.medium)
                         onEdit?()
                     }
+                }
+            }
+        }
+        .sheet(isPresented: $showRefundSheet) {
+            NavigationStack {
+                Form {
+                    Section {
+                        HStack {
+                            Text("原价")
+                            Spacer()
+                            Text(ExpenseChrome.money(current.amount))
+                                .foregroundStyle(.secondary)
+                        }
+                        TextField("退款金额", text: $refundText)
+                            .keyboardType(.decimalPad)
+                        if let amount = Decimal(string: refundText), amount > 0, amount < current.amount {
+                            HStack {
+                                Text("实付")
+                                Spacer()
+                                Text(ExpenseChrome.money(current.amount - amount))
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                    } footer: {
+                        Text("退款须小于原价。填 0 可清除退款。")
+                    }
+                    Section("说明（可选）") {
+                        TextField("例如：房型变更退款", text: $refundNote)
+                    }
+                    if let refundError {
+                        Section {
+                            Text(refundError)
+                                .foregroundStyle(.red)
+                                .font(.footnote)
+                        }
+                    }
+                }
+                .navigationTitle(current.hasRefund ? "修改退款" : "记录退款")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showRefundSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") {
+                            saveRefund()
+                        }
+                        .disabled(isSavingRefund || Decimal(string: refundText) == nil)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .onAppear { displayedExpense = expense }
+    }
+
+    private func saveRefund() {
+        guard let amount = Decimal(string: refundText), amount >= 0, amount < current.amount else {
+            refundError = "请输入小于原价的退款金额"
+            return
+        }
+        guard let onSetRefund else { return }
+        isSavingRefund = true
+        refundError = nil
+        Task {
+            let note = refundNote.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = await onSetRefund(amount, note.isEmpty ? nil : note)
+            await MainActor.run {
+                isSavingRefund = false
+                switch result {
+                case .success(let updated):
+                    displayedExpense = updated
+                    showRefundSheet = false
+                    HapticManager.notificationOccurred(.success)
+                case .failure(let error):
+                    refundError = error.localizedDescription
+                    HapticManager.notificationOccurred(.error)
                 }
             }
         }
@@ -187,13 +276,13 @@ struct ExpenseDetailView: View {
 
     @ViewBuilder
     private func confirmationLabel(for participant: Person) -> some View {
-        if participant.userId == expense.createdBy
-            || participant.userId == expense.payer.userId {
+        if participant.userId == current.createdBy
+            || participant.userId == current.payer.userId {
             Label("无需确认", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
         } else {
-            switch expense.confirmationStatus(for: participant) {
+            switch current.confirmationStatus(for: participant) {
             case .confirmed:
                 Label("已确认", systemImage: "checkmark.circle.fill")
                     .font(.caption)

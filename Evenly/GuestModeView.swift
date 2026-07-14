@@ -10,6 +10,9 @@ private struct GuestTransfer: Identifiable {
 
 @MainActor
 final class GuestLedgerStore: ObservableObject {
+    /// Local / guest mode cap (device-only ledgers).
+    static let maxLedgerCount = 3
+
     @Published private(set) var ledgers: [Ledger] = []
     @Published var currentLedgerId: UUID?
 
@@ -25,12 +28,23 @@ final class GuestLedgerStore: ObservableObject {
         return ledgers.first { $0.id == currentLedgerId } ?? ledgers.first
     }
 
+    var canCreateLedger: Bool {
+        ledgers.count < Self.maxLedgerCount
+    }
+
+    var remainingLedgerSlots: Int {
+        max(0, Self.maxLedgerCount - ledgers.count)
+    }
+
     func select(_ ledger: Ledger) {
         currentLedgerId = ledger.id
         UserDefaults.standard.set(ledger.id.uuidString, forKey: selectedLedgerKey)
     }
 
-    func createLedger(title: String, memberNames: [String]) {
+    /// Returns `false` when the local ledger limit has been reached.
+    @discardableResult
+    func createLedger(title: String, memberNames: [String]) -> Bool {
+        guard canCreateLedger else { return false }
         let owner = Person(name: "我", isTemporary: true)
         let otherMembers = memberNames
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -47,6 +61,7 @@ final class GuestLedgerStore: ObservableObject {
         ledgers.append(ledger)
         select(ledger)
         save()
+        return true
     }
 
     func addMember(name: String) {
@@ -168,6 +183,7 @@ struct GuestModeView: View {
     @State private var selectedExpense: Expense?
     @State private var showingMembers = false
     @State private var showingDeleteLedger = false
+    @State private var showingLedgerLimitAlert = false
 
     private enum GuestSheet: String, Identifiable {
         case addLedger
@@ -186,10 +202,10 @@ struct GuestModeView: View {
                     ContentUnavailableView {
                         Label("开始本地记账", systemImage: "iphone")
                     } description: {
-                        Text("无需注册。账本仅保存在这台设备上。")
+                        Text("无需注册。账本仅保存在这台设备上，最多 \(GuestLedgerStore.maxLedgerCount) 个。")
                     } actions: {
                         Button("创建本地账本") {
-                            sheet = .addLedger
+                            presentAddLedger()
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -200,7 +216,7 @@ struct GuestModeView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         if !store.ledgers.isEmpty {
-                            Section("本地账本") {
+                            Section("本地账本（\(store.ledgers.count)/\(GuestLedgerStore.maxLedgerCount)）") {
                                 ForEach(store.ledgers) { ledger in
                                     Button {
                                         store.select(ledger)
@@ -216,10 +232,16 @@ struct GuestModeView: View {
                         }
 
                         Button {
-                            sheet = .addLedger
+                            presentAddLedger()
                         } label: {
-                            Label("新建本地账本", systemImage: "plus")
+                            Label(
+                                store.canCreateLedger
+                                    ? "新建本地账本"
+                                    : "新建本地账本（已达上限）",
+                                systemImage: "plus"
+                            )
                         }
+                        .disabled(!store.canCreateLedger)
 
                         Button {
                             auth.leaveGuestMode()
@@ -278,7 +300,9 @@ struct GuestModeView: View {
             switch item {
             case .addLedger:
                 GuestAddLedgerView { title, members in
-                    store.createLedger(title: title, memberNames: members)
+                    if !store.createLedger(title: title, memberNames: members) {
+                        showingLedgerLimitAlert = true
+                    }
                 }
             case .addMember:
                 GuestAddMemberView { name in
@@ -307,6 +331,12 @@ struct GuestModeView: View {
                 NavigationStack { ExpenseDetailView(expense: expense, ledger: ledger) }
             }
         }
+        .alert("本地账本已达上限", isPresented: $showingLedgerLimitAlert) {
+            Button("知道了", role: .cancel) {}
+            Button("去登录") { auth.leaveGuestMode() }
+        } message: {
+            Text("本地模式最多 \(GuestLedgerStore.maxLedgerCount) 个账本。登录后可创建更多云端账本。")
+        }
         .alert("删除本地账本？", isPresented: $showingDeleteLedger) {
             Button("取消", role: .cancel) {}
             Button("删除", role: .destructive) {
@@ -315,6 +345,14 @@ struct GuestModeView: View {
         } message: {
             Text("账本及其中的本地账单将从此设备永久删除。")
         }
+    }
+
+    private func presentAddLedger() {
+        guard store.canCreateLedger else {
+            showingLedgerLimitAlert = true
+            return
+        }
+        sheet = .addLedger
     }
 
     private func ledgerView(_ ledger: Ledger) -> some View {
@@ -463,7 +501,7 @@ private struct GuestAddLedgerView: View {
                 TextField("账本名称", text: $title)
                 TextField("其他成员，用逗号分隔", text: $members)
                 Section {
-                    Text("“我”会自动加入账本。成员名称只保存在本机。")
+                    Text("“我”会自动加入账本。成员名称只保存在本机。本地模式最多 \(GuestLedgerStore.maxLedgerCount) 个账本。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

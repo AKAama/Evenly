@@ -3,7 +3,7 @@ import Combine
 import UIKit
 import UserNotifications
 
-enum NotificationDestination: Equatable {
+enum NotificationDestination: Equatable, Sendable {
     case ledger(UUID)
     case invitations
 
@@ -98,8 +98,14 @@ final class NotificationManager: NSObject, ObservableObject {
 
     /// Called for both foreground delivery and user taps so in-app state stays fresh.
     func handleRemoteNotification(userInfo: [AnyHashable: Any], openedByUser: Bool) {
+        handleRemoteNotification(
+            destination: NotificationDestination(userInfo: userInfo),
+            openedByUser: openedByUser
+        )
+    }
+
+    func handleRemoteNotification(destination: NotificationDestination?, openedByUser: Bool) {
         remoteRefreshTick &+= 1
-        let destination = NotificationDestination(userInfo: userInfo)
         if openedByUser {
             pendingDestination = destination
         } else if destination == .invitations {
@@ -136,9 +142,10 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        let userInfo = notification.request.content.userInfo
+        // Parse on this nonisolated context; only hop a Sendable destination to MainActor.
+        let destination = NotificationDestination(userInfo: notification.request.content.userInfo)
         await MainActor.run {
-            self.handleRemoteNotification(userInfo: userInfo, openedByUser: false)
+            self.handleRemoteNotification(destination: destination, openedByUser: false)
         }
         return [.banner, .sound, .badge]
     }
@@ -147,9 +154,9 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        let userInfo = response.notification.request.content.userInfo
+        let destination = NotificationDestination(userInfo: response.notification.request.content.userInfo)
         await MainActor.run {
-            self.handleRemoteNotification(userInfo: userInfo, openedByUser: true)
+            self.handleRemoteNotification(destination: destination, openedByUser: true)
         }
     }
 }

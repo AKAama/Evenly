@@ -1330,9 +1330,14 @@ private final class VoiceExpenseStreamingSession: NSObject, ObservableObject {
 
     private func configureAudioEngine() throws {
         let session = AVAudioSession.sharedInstance()
-        // Use allowBluetooth for Xcode 16 / iOS 18 SDK (CI). allowBluetoothHFP is only
-        // available on newer SDKs and fails to compile on macos-15 runners.
-        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .defaultToSpeaker])
+        // allowBluetooth / allowBluetoothHFP share the same bit (1 << 2). Using the raw
+        // value avoids deprecation on new SDKs and missing-symbol errors on Xcode 16 CI.
+        let bluetoothMic = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
+        try session.setCategory(
+            .playAndRecord,
+            mode: .default,
+            options: [bluetoothMic, .defaultToSpeaker]
+        )
         try session.setActive(true)
 
         let inputNode = audioEngine.inputNode

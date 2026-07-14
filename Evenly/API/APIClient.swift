@@ -203,6 +203,7 @@ final class APIClient: ObservableObject {
         }
 
         var request = URLRequest(url: url)
+        request.setValue("ios", forHTTPHeaderField: "X-Client")
         if requiresAuth {
             guard let token else {
                 throw APIError.unauthorized
@@ -230,6 +231,8 @@ final class APIClient: ObservableObject {
 
         // Set headers
         request.setValue(contentType.headerValue, forHTTPHeaderField: "Content-Type")
+        // Helps server audit feed attribute events to iOS.
+        request.setValue("ios", forHTTPHeaderField: "X-Client")
 
         if requiresAuth {
             guard let token = token else {

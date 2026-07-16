@@ -209,11 +209,32 @@ struct LedgerCreate: Encodable {
     let name: String
     let currency: String?
     let members: [MemberCreate]
+    let requireConfirmation: Bool
 
     enum CodingKeys: String, CodingKey {
         case name
         case currency
         case members
+        case requireConfirmation = "require_confirmation"
+    }
+}
+
+struct LedgerUpdate: Encodable {
+    var name: String? = nil
+    var currency: String? = nil
+    var requireConfirmation: Bool? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case currency
+        case requireConfirmation = "require_confirmation"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(currency, forKey: .currency)
+        try container.encodeIfPresent(requireConfirmation, forKey: .requireConfirmation)
     }
 }
 
@@ -222,6 +243,7 @@ struct LedgerResponse: Decodable, Identifiable {
     let name: String
     let ownerId: String
     let currency: String?
+    let requireConfirmation: Bool
     let createdAt: Date?
     let updatedAt: Date?
     let memberCount: Int?
@@ -232,10 +254,24 @@ struct LedgerResponse: Decodable, Identifiable {
         case name
         case ownerId = "owner_id"
         case currency
+        case requireConfirmation = "require_confirmation"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case memberCount = "member_count"
         case expenseCount = "expense_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        ownerId = try container.decode(String.self, forKey: .ownerId)
+        currency = try container.decodeIfPresent(String.self, forKey: .currency)
+        requireConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requireConfirmation) ?? true
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount)
+        expenseCount = try container.decodeIfPresent(Int.self, forKey: .expenseCount)
     }
 
     var needsSummaryHydration: Bool {
@@ -248,6 +284,7 @@ struct LedgerWithMembers: Decodable {
     let name: String
     let ownerId: String
     let currency: String?
+    let requireConfirmation: Bool
     let createdAt: Date?
     let members: [MemberResponse]
 
@@ -256,8 +293,20 @@ struct LedgerWithMembers: Decodable {
         case name
         case ownerId = "owner_id"
         case currency
+        case requireConfirmation = "require_confirmation"
         case createdAt = "created_at"
         case members
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        ownerId = try container.decode(String.self, forKey: .ownerId)
+        currency = try container.decodeIfPresent(String.self, forKey: .currency)
+        requireConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requireConfirmation) ?? true
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        members = try container.decodeIfPresent([MemberResponse].self, forKey: .members) ?? []
     }
 }
 
@@ -693,6 +742,8 @@ struct SettlementInstruction: Decodable, Identifiable {
     let toUserId: String
     let toUserName: String
     let amount: Decimal
+    /// True when either party still has pending (unconfirmed) bills affecting this flow.
+    let includesUnconfirmed: Bool
 
     var id: String { "\(fromUserId)-\(toUserId)" }
 
@@ -702,6 +753,7 @@ struct SettlementInstruction: Decodable, Identifiable {
         case toUserId = "to_user_id"
         case toUserName = "to_user_name"
         case amount
+        case includesUnconfirmed = "includes_unconfirmed"
     }
 
     init(from decoder: Decoder) throws {
@@ -711,6 +763,7 @@ struct SettlementInstruction: Decodable, Identifiable {
         toUserId = try container.decode(String.self, forKey: .toUserId)
         toUserName = try container.decode(String.self, forKey: .toUserName)
         amount = try container.decodeFlexibleDecimal(forKey: .amount)
+        includesUnconfirmed = try container.decodeIfPresent(Bool.self, forKey: .includesUnconfirmed) ?? false
     }
 }
 

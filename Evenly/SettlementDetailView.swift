@@ -31,7 +31,9 @@ struct SettlementDetailView: View {
                         }
                     }
 
-                    Text("根据所有成员已确认的账单自动计算")
+                    Text(suggestions.contains(where: \.includesUnconfirmed)
+                         ? "按全部账单预估终局流向；灰色条目仍含未确认账单"
+                         : "根据账本账单自动计算的转账方案")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(.top, 2)
@@ -84,17 +86,28 @@ struct SettlementDetailView: View {
     }
 
     private func settlementCard(_ settlement: Settlement) -> some View {
-        VStack(spacing: 16) {
+        let provisional = settlement.includesUnconfirmed
+        return VStack(spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("转账金额")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("转账金额")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if provisional {
+                        Text("未确认")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.secondary.opacity(0.14), in: Capsule())
+                    }
+                }
 
                 Spacer()
 
                 Text(formatAmount(settlement.amount))
                     .font(.title2.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(provisional ? Color.secondary : Color.primary)
                     .monospacedDigit()
             }
 
@@ -102,41 +115,49 @@ struct SettlementDetailView: View {
                 personView(
                     name: settlement.fromUserName,
                     userId: settlement.fromUserId,
-                    role: "付款"
+                    role: "付款",
+                    muted: provisional
                 )
 
-                flowIndicator
+                flowIndicator(muted: provisional)
 
                 personView(
                     name: settlement.toUserName,
                     userId: settlement.toUserId,
-                    role: "收款"
+                    role: "收款",
+                    muted: provisional
                 )
             }
         }
         .padding(18)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(
+            (provisional ? Color(.tertiarySystemFill) : Color(.secondarySystemGroupedBackground)),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(Color.primary.opacity(colorScheme == .dark ? 0.09 : 0.04), lineWidth: 0.75)
         }
         .shadow(color: .black.opacity(colorScheme == .dark ? 0.18 : 0.05), radius: 14, y: 6)
+        .opacity(provisional ? 0.9 : 1)
     }
 
-    private func personView(name: String, userId: String, role: String) -> some View {
+    private func personView(name: String, userId: String, role: String, muted: Bool = false) -> some View {
         let person = ledger.person(by: userId)
+        let accent = muted ? Color.secondary : EvenlyStyle.brandBlue
 
         return VStack(spacing: 7) {
             RemoteAvatarView(
                 avatarUrl: person?.avatarUrl,
                 fallbackText: name,
                 size: 48,
-                fallbackBackground: EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.24 : 0.12),
-                fallbackForeground: EvenlyStyle.brandBlue
+                fallbackBackground: accent.opacity(colorScheme == .dark ? 0.24 : 0.12),
+                fallbackForeground: accent
             )
 
             Text(name)
                 .font(.subheadline.weight(.medium))
+                .foregroundStyle(muted ? .secondary : .primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
@@ -147,15 +168,16 @@ struct SettlementDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var flowIndicator: some View {
-        HStack(spacing: 3) {
+    private func flowIndicator(muted: Bool = false) -> some View {
+        let accent = muted ? Color.secondary : EvenlyStyle.brandBlue
+        return HStack(spacing: 3) {
             Capsule()
-                .fill(EvenlyStyle.brandBlue.opacity(0.22))
+                .fill(accent.opacity(0.22))
                 .frame(width: 16, height: 2)
 
             Image(systemName: "arrow.right")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(EvenlyStyle.brandBlue)
+                .foregroundStyle(accent)
         }
         .accessibilityHidden(true)
     }

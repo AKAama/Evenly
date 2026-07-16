@@ -92,7 +92,11 @@ struct ExpenseDetailView: View {
     private var current: Expense { displayedExpense ?? expense }
 
     private var canEdit: Bool {
-        current.status == .pending && current.createdBy == currentUserId
+        guard current.createdBy == currentUserId else { return false }
+        if current.status == .rejected { return false }
+        // When the ledger skips confirmation, creators may still edit confirmed bills.
+        if !ledger.requireConfirmation { return true }
+        return current.status == .pending
     }
 
     private var canRefund: Bool {
@@ -136,7 +140,9 @@ struct ExpenseDetailView: View {
                             }
                         }
                         Spacer()
-                        confirmationLabel(for: participant)
+                        if ledger.requireConfirmation {
+                            confirmationLabel(for: participant)
+                        }
                     }
                     .padding(.vertical, 2)
                 }

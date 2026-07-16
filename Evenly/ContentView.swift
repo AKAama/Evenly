@@ -32,6 +32,7 @@ struct ContentView: View {
     @State private var didLongPressLedgerMenu = false
     @State private var joinToast: String?
     @State private var isHandlingJoinLink = false
+    @State private var shareSnapshot: LedgerShareSnapshot?
     @ObservedObject private var deepLinks = DeepLinkInbox.shared
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
@@ -145,6 +146,9 @@ struct ContentView: View {
         contentRoot
             .sheet(item: $sheetType) { item in
                 sheetContent(for: item)
+            }
+            .sheet(item: $shareSnapshot) { snapshot in
+                LedgerShareSheet(snapshot: snapshot)
             }
     }
 
@@ -443,8 +447,10 @@ struct ContentView: View {
         }
     }
 
-    private func canEditExpense(_ expense: Expense) -> Bool {
-        expense.status == .pending && expense.createdBy == auth.user?.id
+    private func canEditExpense(_ expense: Expense, in ledger: Ledger) -> Bool {
+        expense.createdBy == auth.user?.id
+            && expense.status != .rejected
+            && (expense.status == .pending || !ledger.requireConfirmation)
     }
 
     private func openEditExpense(_ expense: Expense, in ledger: Ledger) {
@@ -518,6 +524,13 @@ struct ContentView: View {
                         // Trailing menu keeps secondary / destructive account-level actions.
                         Menu {
                             if let currentLedger = ledgerStore.currentLedger {
+                                Button {
+                                    HapticManager.impact(.light)
+                                    presentLedgerShare(for: currentLedger)
+                                } label: {
+                                    Label("分享账本小结", systemImage: "square.and.arrow.up")
+                                }
+
                                 Button {
                                     HapticManager.impact(.light)
                                     ledgerStore.clearCurrentLedgerSelection()
@@ -755,7 +768,7 @@ struct ContentView: View {
     private func expenseListRow(_ expense: Expense, ledger: Ledger) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             ExpenseUnifiedListRow(expense: expense)
-            if canRespond(to: expense) {
+            if canRespond(to: expense, in: ledger) {
                 HStack {
                     Spacer()
                     Button {
@@ -809,7 +822,7 @@ struct ContentView: View {
                 Label("复制金额", systemImage: "yensign.circle")
             }
 
-            if canRespond(to: expense) {
+            if canRespond(to: expense, in: ledger) {
                 Divider()
                 Button {
                     HapticManager.impact(.medium, intensity: 0.9)
@@ -825,7 +838,7 @@ struct ContentView: View {
                 }
             }
 
-            if canEditExpense(expense) {
+            if canEditExpense(expense, in: ledger) {
                 Divider()
                 Button {
                     openEditExpense(expense, in: ledger)
@@ -844,7 +857,7 @@ struct ContentView: View {
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            if canRespond(to: expense) {
+            if canRespond(to: expense, in: ledger) {
                 Button {
                     HapticManager.impact(.medium, intensity: 0.95)
                     respond(to: expense, with: .confirmed, in: ledger)
@@ -852,7 +865,7 @@ struct ContentView: View {
                     Label("确认", systemImage: "checkmark.circle.fill")
                 }
                 .tint(.green)
-            } else if canEditExpense(expense) {
+            } else if canEditExpense(expense, in: ledger) {
                 Button {
                     openEditExpense(expense, in: ledger)
                 } label: {
@@ -936,7 +949,9 @@ struct ContentView: View {
             } header: {
                 Text("与我相关的转账流向")
             } footer: {
-                Text("所有参与成员确认账单后，系统会自动生成转账流向")
+                Text(ledger.requireConfirmation
+                     ? "转账按全部账单预估（含未确认）；未确认相关会灰色标记"
+                     : "本账本未开启确认：记账后立即进入转账流向")
             }
         }
     }
@@ -978,6 +993,13 @@ struct ContentView: View {
 
             HStack(spacing: 10) {
                 Button {
+                    presentLedgerShare(for: ledger)
+                    HapticManager.impact(.light)
+                } label: {
+                    overviewAction(icon: "square.and.arrow.up", label: "分享")
+                }
+                .buttonStyle(.plain)
+                Button {
                     sheetType = .members(ledger)
                     HapticManager.impact(.light)
                 } label: {
@@ -1000,6 +1022,13 @@ struct ContentView: View {
         .shadow(color: EvenlyStyle.brandBlue.opacity(colorScheme == .dark ? 0.20 : 0.16), radius: 10, y: 5)
         .padding(.horizontal, 4)
         .padding(.vertical, 5)
+    }
+
+    private func presentLedgerShare(for ledger: Ledger) {
+        shareSnapshot = LedgerShareSnapshot.build(
+            ledger: ledger,
+            settlements: settlementSuggestions
+        )
     }
 
     private var overviewCardBackground: some ShapeStyle {
@@ -1060,7 +1089,11 @@ struct ContentView: View {
 
 
 
-    private func canRespond(to expense: Expense) -> Bool {
+    private func canRespond(to expense: Expense, in ledger: Ledger? = nil) -> Bool {
+        let host = ledger
+            ?? ledgerStore.currentLedger
+            ?? ledgerStore.ledgers.first(where: { $0.expenses.contains(where: { $0.id == expense.id }) })
+        guard let host, host.requireConfirmation else { return false }
         guard expense.status == .pending,
               let userId = auth.user?.id,
               // Creator and payer do not need to confirm.
@@ -1115,20 +1148,11 @@ struct ContentView: View {
     }
 
     /// 与当前用户相关的转账流向:我需转给别人的 + 别人需转给我的
-    /// 后端根据所有已确认账单实时生成流向，这里只过滤出涉及当前用户的项目。
+    /// 后端按 confirmed+pending 预估终局流向；含未确认的会带 includesUnconfirmed。
     private func mySettlements(in ledger: Ledger) -> [Settlement] {
         guard let me = auth.user?.id else { return [] }
-        return settlementSuggestions.compactMap { suggestion in
-            guard suggestion.fromUserId == me || suggestion.toUserId == me else { return nil }
-            guard suggestion.amount > 0 else { return nil }
-            return Settlement(
-                id: suggestion.id,
-                fromUserId: suggestion.fromUserId,
-                fromUserName: suggestion.fromUserName,
-                toUserId: suggestion.toUserId,
-                toUserName: suggestion.toUserName,
-                amount: suggestion.amount
-            )
+        return settlementSuggestions.filter { suggestion in
+            (suggestion.fromUserId == me || suggestion.toUserId == me) && suggestion.amount > 0
         }
     }
 
@@ -1136,22 +1160,32 @@ struct ContentView: View {
     private func mySettlementRow(_ settlement: Settlement) -> some View {
         let me = auth.user?.id
         let iOwe = settlement.fromUserId == me
+        let provisional = settlement.includesUnconfirmed
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(iOwe ? Color.orange.opacity(0.2) : Color.green.opacity(0.2))
+                    .fill(provisional
+                          ? Color.secondary.opacity(0.18)
+                          : (iOwe ? Color.orange.opacity(0.2) : Color.green.opacity(0.2)))
                     .frame(width: 36, height: 36)
                 Image(systemName: iOwe ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                    .foregroundStyle(iOwe ? .orange : .green)
+                    .foregroundStyle(provisional ? Color.secondary : (iOwe ? .orange : .green))
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 if iOwe {
                     Text("我需转给 \(settlement.toUserName)")
                         .font(.subheadline)
+                        .foregroundStyle(provisional ? .secondary : .primary)
                 } else {
                     Text("\(settlement.fromUserName) 需转给我")
                         .font(.subheadline)
+                        .foregroundStyle(provisional ? .secondary : .primary)
+                }
+                if provisional {
+                    Text("含未确认账单")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -1159,9 +1193,10 @@ struct ContentView: View {
 
             Text(formatAmount(settlement.amount))
                 .font(.headline)
-                .foregroundStyle(iOwe ? .orange : .green)
+                .foregroundStyle(provisional ? Color.secondary : (iOwe ? .orange : .green))
         }
         .padding(.vertical, 2)
+        .opacity(provisional ? 0.85 : 1)
     }
 
     private func leaveLedger(_ ledger: Ledger) {
@@ -1187,13 +1222,15 @@ struct ContentView: View {
         }
     }
 
+    /// Net per member from **confirmed** expenses only (same rule as backend settlement).
+    /// Positive = 应收, negative = 应付. Pending / rejected bills do not move balances.
     private func calculateBalanceResults(for ledger: Ledger) -> [BalanceResult] {
         var balances: [Person: Decimal] = [:]
-        for participant in ledger.participants {
+        for participant in ledger.participants where participant.isActive {
             balances[participant] = 0
         }
 
-        for expense in ledger.expenses {
+        for expense in ledger.settlementExpenses {
             if expense.participants.isEmpty { continue }
             let net = expense.netAmount
             let share = net / Decimal(expense.participants.count)

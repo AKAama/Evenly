@@ -403,7 +403,8 @@ final class LedgerStore: ObservableObject {
                 let createRequest = LedgerCreate(
                     name: ledger.title,
                     currency: nil,
-                    members: members
+                    members: members,
+                    requireConfirmation: ledger.requireConfirmation
                 )
 
                 let response: LedgerWithMembers = try await api.post(APIEndpoints.ledgers, body: createRequest)
@@ -589,6 +590,46 @@ final class LedgerStore: ObservableObject {
                 await MainActor.run {
                     completion(.failure(error))
                 }
+            }
+        }
+    }
+
+    /// Owner updates ledger settings (e.g. require_confirmation).
+    func updateLedgerSettings(
+        _ ledger: Ledger,
+        requireConfirmation: Bool? = nil,
+        name: String? = nil,
+        completion: @escaping (Result<Ledger, Error>) -> Void
+    ) {
+        Task {
+            do {
+                let body = LedgerUpdate(
+                    name: name,
+                    requireConfirmation: requireConfirmation
+                )
+                let response: LedgerWithMembers = try await api.patch(
+                    APIEndpoints.ledger(id: ledger.id.uuidString),
+                    body: body
+                )
+                var updated = Ledger(from: response)
+                // Keep local expenses; server may have auto-confirmed pending ones.
+                if requireConfirmation == false {
+                    updated.expenses = ledger.expenses.map { expense in
+                        guard expense.status == .pending else { return expense }
+                        var confirmed = expense
+                        confirmed.status = .confirmed
+                        return confirmed
+                    }
+                } else {
+                    updated.expenses = ledger.expenses
+                }
+                updated.expenseCount = updated.expenses.count
+                await MainActor.run {
+                    self.applyUpdatedLedger(updated)
+                    completion(.success(updated))
+                }
+            } catch {
+                await MainActor.run { completion(.failure(error)) }
             }
         }
     }

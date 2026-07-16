@@ -14,6 +14,8 @@ struct AddLedgerView: View {
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var showSaveError = false
+    /// Default on for multi-person trust; owner can turn off anytime.
+    @State private var requireConfirmation = true
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -63,6 +65,7 @@ struct AddLedgerView: View {
         self.existingLedger = ledger
         _title = State(initialValue: ledger?.title ?? "")
         _participants = State(initialValue: ledger?.participants.map { ParticipantInfo(name: $0.name, status: .local) } ?? [])
+        _requireConfirmation = State(initialValue: ledger?.requireConfirmation ?? true)
     }
 
     var body: some View {
@@ -80,6 +83,22 @@ struct AddLedgerView: View {
                     }
                 } header: {
                     Text("账本名称")
+                }
+
+                Section {
+                    Toggle(isOn: $requireConfirmation) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("需要成员确认账单")
+                            Text(requireConfirmation
+                                 ? "参与人确认后，账单才会计入转账与分享"
+                                 : "记账后立即计入转账与分享，无需确认")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(EvenlyStyle.brandBlue)
+                } header: {
+                    Text("结算规则")
                 }
 
                 Section {
@@ -358,7 +377,8 @@ struct AddLedgerView: View {
             ownerId: auth.user?.id ?? "",
             memberIds: [],
             participants: persons,
-            expenses: existingLedger?.expenses ?? []
+            expenses: existingLedger?.expenses ?? [],
+            requireConfirmation: requireConfirmation
         )
 
         if existingLedger != nil {

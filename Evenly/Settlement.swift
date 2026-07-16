@@ -14,6 +14,8 @@ struct Settlement: Identifiable {
     let toUserId: String
     let toUserName: String
     let amount: Decimal
+    /// Pending bills still affect this transfer; show gray "未确认" badge.
+    let includesUnconfirmed: Bool
 
     init(
         id: String = UUID().uuidString,
@@ -21,7 +23,8 @@ struct Settlement: Identifiable {
         fromUserName: String,
         toUserId: String,
         toUserName: String,
-        amount: Decimal
+        amount: Decimal,
+        includesUnconfirmed: Bool = false
     ) {
         self.id = id
         self.fromUserId = fromUserId
@@ -29,6 +32,7 @@ struct Settlement: Identifiable {
         self.toUserId = toUserId
         self.toUserName = toUserName
         self.amount = amount
+        self.includesUnconfirmed = includesUnconfirmed
     }
 
     // Create from SettlementInstruction
@@ -39,6 +43,7 @@ struct Settlement: Identifiable {
         self.toUserId = instruction.toUserId
         self.toUserName = instruction.toUserName
         self.amount = instruction.amount
+        self.includesUnconfirmed = instruction.includesUnconfirmed
     }
 }
 

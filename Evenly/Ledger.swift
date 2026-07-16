@@ -89,10 +89,12 @@ struct Ledger: Identifiable, Codable {
     var members: [MemberResponse]?
     var memberCount: Int
     var expenseCount: Int
+    /// When true, bills need participant confirmation before settlement/share.
+    var requireConfirmation: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, title, ownerId, memberIds, participants, expenses, members
-        case memberCount, expenseCount
+        case memberCount, expenseCount, requireConfirmation
     }
 
     init(
@@ -104,7 +106,8 @@ struct Ledger: Identifiable, Codable {
         expenses: [Expense] = [],
         members: [MemberResponse]? = nil,
         memberCount: Int? = nil,
-        expenseCount: Int? = nil
+        expenseCount: Int? = nil,
+        requireConfirmation: Bool = true
     ) {
         self.id = id
         self.title = title
@@ -115,6 +118,7 @@ struct Ledger: Identifiable, Codable {
         self.members = members
         self.memberCount = memberCount ?? participants.count
         self.expenseCount = expenseCount ?? expenses.count
+        self.requireConfirmation = requireConfirmation
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +132,7 @@ struct Ledger: Identifiable, Codable {
         members = try container.decodeIfPresent([MemberResponse].self, forKey: .members)
         memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount) ?? participants.count
         expenseCount = try container.decodeIfPresent(Int.self, forKey: .expenseCount) ?? expenses.count
+        requireConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requireConfirmation) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -141,6 +146,7 @@ struct Ledger: Identifiable, Codable {
         try container.encodeIfPresent(members, forKey: .members)
         try container.encode(memberCount, forKey: .memberCount)
         try container.encode(expenseCount, forKey: .expenseCount)
+        try container.encode(requireConfirmation, forKey: .requireConfirmation)
     }
 
     // Create from LedgerResponse
@@ -154,6 +160,7 @@ struct Ledger: Identifiable, Codable {
         self.members = nil
         self.memberCount = response.memberCount ?? 0
         self.expenseCount = response.expenseCount ?? 0
+        self.requireConfirmation = response.requireConfirmation
     }
 
     // Create from LedgerWithMembers
@@ -168,6 +175,17 @@ struct Ledger: Identifiable, Codable {
         self.members = response.members
         self.memberCount = activeMembers.count
         self.expenseCount = 0
+        self.requireConfirmation = response.requireConfirmation
+    }
+
+    /// Expenses that shape transfer flow / share money math.
+    /// Confirmed + pending (projected final state); rejected bills stay out.
+    var settlementExpenses: [Expense] {
+        expenses.filter { $0.status != .rejected }
+    }
+
+    var hasPendingSettlementExpenses: Bool {
+        settlementExpenses.contains { $0.status == .pending }
     }
 
     var allMemberIds: [String] {

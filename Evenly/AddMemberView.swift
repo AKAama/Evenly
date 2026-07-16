@@ -36,6 +36,9 @@ struct AddMemberView: View {
     @State private var temporaryName = ""
     @State private var showingInviteQR = false
     @State private var showingInviteSearch = false
+    @State private var requireConfirmation = true
+    @State private var isSavingConfirmationSetting = false
+    @State private var confirmationSettingError: String?
     @FocusState private var temporaryNameFocused: Bool
 
     private var activeMembers: [Person] {
@@ -63,6 +66,54 @@ struct AddMemberView: View {
                             .font(.subheadline)
                             .foregroundStyle(.green)
                     }
+                }
+
+                Section {
+                    if isOwner {
+                        Toggle(isOn: Binding(
+                            get: { requireConfirmation },
+                            set: { applyRequireConfirmation($0) }
+                        )) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("需要成员确认账单")
+                                Text(requireConfirmation
+                                     ? "参与人确认后才计入转账与分享"
+                                     : "记账后立即计入转账与分享")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .tint(EvenlyStyle.brandBlue)
+                        .disabled(isSavingConfirmationSetting)
+                        if isSavingConfirmationSetting {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("保存中…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let confirmationSettingError {
+                            Text(confirmationSettingError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    } else {
+                        HStack {
+                            Text("账单确认")
+                            Spacer()
+                            Text(ledger.requireConfirmation ? "已开启" : "已关闭")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("结算规则")
+                } footer: {
+                    Text(isOwner
+                         ? "关闭后，当前待确认账单会立刻生效并进入转账流向。"
+                         : (ledger.requireConfirmation
+                            ? "本账本需成员确认账单后才计入转账与分享。"
+                            : "本账本记账后立即计入转账与分享，无需确认。"))
                 }
 
                 // Primary: who is in this ledger
@@ -99,6 +150,10 @@ struct AddMemberView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("成员")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { requireConfirmation = ledger.requireConfirmation }
+            .onChange(of: ledger.requireConfirmation) { _, newValue in
+                requireConfirmation = newValue
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -205,6 +260,27 @@ struct AddMemberView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                     if successMessage == value { successMessage = nil }
                 }
+            }
+        }
+    }
+
+    private func applyRequireConfirmation(_ enabled: Bool) {
+        guard enabled != requireConfirmation else { return }
+        let previous = requireConfirmation
+        requireConfirmation = enabled
+        isSavingConfirmationSetting = true
+        confirmationSettingError = nil
+        ledgerStore.updateLedgerSettings(ledger, requireConfirmation: enabled) { result in
+            isSavingConfirmationSetting = false
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+                successMessage = enabled ? "已开启账单确认" : "已关闭账单确认，待确认账单已生效"
+                ledgerStore.fetchOverview(for: ledger, force: true) { _ in }
+            case .failure(let error):
+                requireConfirmation = previous
+                confirmationSettingError = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
             }
         }
     }

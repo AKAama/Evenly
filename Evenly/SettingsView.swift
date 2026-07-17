@@ -211,14 +211,17 @@ struct AccountSettingsView: View {
                     .onChange(of: avatarItem) { _, item in handleAvatarSelection(item) }
                 }
 
-                Section("账户信息") {
+                Section {
                     Button { showingChangeDisplayName = true } label: {
                         LabeledContent("显示名称", value: auth.userProfile?.displayName ?? user.displayName ?? "用户")
                     }
                     .foregroundStyle(.primary)
 
                     Button { showingChangeUsername = true } label: {
-                        LabeledContent("用户名", value: "@\(user.username)")
+                        LabeledContent(
+                            "用户名",
+                            value: user.usernameIsGenerated ? "可自定义 @" + user.username : "@\(user.username)"
+                        )
                     }
                     .foregroundStyle(.primary)
 
@@ -240,7 +243,12 @@ struct AccountSettingsView: View {
                             systemImage: auth.hasPassword ? "lock.rotation" : "lock.badge.plus"
                         )
                     }
-
+                } header: {
+                    Text("账户信息")
+                } footer: {
+                    if user.usernameIsGenerated {
+                        Text("使用 Apple 登录时已自动创建账号。显示名称与用户名可在设置中随时修改，登录后无需再填写邮箱或姓名。")
+                    }
                 }
 
                 Section {

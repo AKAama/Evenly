@@ -86,14 +86,8 @@ struct ContentView: View {
 
     private var contentWithAlerts: some View {
         contentWithSheet
-            .sheet(isPresented: Binding(
-                get: { auth.user?.usernameIsGenerated == true },
-                set: { _ in }
-            )) {
-                UsernameSetupView(required: true)
-                    .environmentObject(auth)
-                    .interactiveDismissDisabled()
-            }
+            // Do not force username/name/email setup after Sign in with Apple —
+            // App Store Guideline 4 / SIWA: use Authentication Services data only.
             .alert("操作失败", isPresented: Binding(
                 get: { actionError != nil },
                 set: { if !$0 { actionError = nil } }

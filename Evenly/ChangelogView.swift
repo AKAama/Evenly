@@ -8,6 +8,15 @@ struct ChangelogEntry: Identifiable {
 
     static let all: [ChangelogEntry] = [
         ChangelogEntry(
+            id: "2026.07.17",
+            date: "2026 年 7 月 17 日",
+            title: "通过 Apple 登录体验优化",
+            items: [
+                "使用 Apple 登录后直接进入账本，不再强制填写用户名、姓名或邮箱。",
+                "显示名称与用户名可在「设置 → 账户」中随时修改。",
+            ]
+        ),
+        ChangelogEntry(
             id: "2026.07.16",
             date: "2026 年 7 月 16 日",
             title: "分享、确认与转账预估",

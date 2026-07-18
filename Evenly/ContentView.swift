@@ -512,49 +512,26 @@ struct ContentView: View {
                     .buttonStyle(.spring(.light))
                 }
 
-                if ledgerStore.currentLedger != nil {
+                if let currentLedger = ledgerStore.currentLedger {
                     ToolbarItem(placement: .topBarTrailing) {
-                        // Primary actions live on the overview card (成员 / 添加账单).
-                        // Trailing menu keeps secondary / destructive account-level actions.
-                        Menu {
-                            if let currentLedger = ledgerStore.currentLedger {
-                                Button {
-                                    HapticManager.impact(.light)
-                                    presentLedgerShare(for: currentLedger)
-                                } label: {
-                                    Label("分享账本小结", systemImage: "square.and.arrow.up")
-                                }
-
-                                Button {
-                                    HapticManager.impact(.light)
-                                    ledgerStore.clearCurrentLedgerSelection()
-                                    searchText = ""
-                                } label: {
-                                    Label("切换账本", systemImage: "arrow.left.arrow.right")
-                                }
-
-                                if let userId = auth.user?.id, currentLedger.ownerId != userId {
-                                    Divider()
-                                    Button(role: .destructive) {
-                                        HapticManager.notificationOccurred(.warning)
-                                        showingLeaveLedgerAlert = true
-                                    } label: {
-                                        Label("退出账本", systemImage: "rectangle.portrait.and.arrow.right")
-                                    }
-                                } else if currentLedger.ownerId == auth.user?.id {
-                                    Divider()
-                                    Button(role: .destructive) {
-                                        HapticManager.notificationOccurred(.warning)
-                                        showingDeleteLedgerAlert = true
-                                    } label: {
-                                        Label("删除账本", systemImage: "trash")
-                                    }
-                                }
+                        // Single action — no nested menu for one item.
+                        if let userId = auth.user?.id, currentLedger.ownerId != userId {
+                            Button(role: .destructive) {
+                                HapticManager.notificationOccurred(.warning)
+                                showingLeaveLedgerAlert = true
+                            } label: {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
                             }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
+                            .accessibilityLabel("退出账本")
+                        } else if currentLedger.ownerId == auth.user?.id {
+                            Button(role: .destructive) {
+                                HapticManager.notificationOccurred(.warning)
+                                showingDeleteLedgerAlert = true
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .accessibilityLabel("删除账本")
                         }
-                        .accessibilityLabel("更多")
                     }
                 } else {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -576,53 +553,12 @@ struct ContentView: View {
 
     /// Explicit pick when the user has multiple ledgers and no last-used selection.
     private var ledgerPickerView: some View {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let items = query.isEmpty
-            ? ledgerStore.ledgers
-            : ledgerStore.ledgers.filter { $0.title.localizedCaseInsensitiveContains(query) }
-
-        return List {
-            Section {
-                ForEach(items) { ledger in
-                    Button {
-                        HapticManager.impact(.light)
-                        searchText = ""
-                        ledgerStore.setCurrentLedger(ledger)
-                    } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(EvenlyStyle.brandBlue.opacity(0.12))
-                                    .frame(width: 44, height: 44)
-                                Text(String(ledger.title.prefix(1)))
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(EvenlyStyle.brandBlue)
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(ledger.title)
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                Text("\(ledger.memberCount) 人 · \(ledger.expenseCount) 笔账单")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            } header: {
-                Text("你的账本")
-            } footer: {
-                Text("点选一个账本开始记账。下次会记住你上次打开的账本。")
-            }
-        }
-        .listStyle(.insetGrouped)
+        LedgerPickerBookshelf(
+            searchText: searchText,
+            onClearSearch: { searchText = "" }
+        )
+        .environmentObject(ledgerStore)
+        .environmentObject(auth)
     }
 
     private func openLedgerDrawerFromMenuButton() {

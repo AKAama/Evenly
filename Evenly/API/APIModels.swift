@@ -100,6 +100,12 @@ struct UserResponse: Codable, Identifiable {
     let avatarUrl: String?
     let createdAt: Date?
     let usernameIsGenerated: Bool
+    /// Nameplate key from admin catalog
+    let badge: String?
+    /// Chinese label from server, e.g. 创始人
+    let badgeLabel: String?
+    /// Ant Design color name or #hex
+    let badgeColor: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -109,6 +115,47 @@ struct UserResponse: Codable, Identifiable {
         case avatarUrl = "avatar_url"
         case createdAt = "created_at"
         case usernameIsGenerated = "username_is_generated"
+        case badge
+        case badgeLabel = "badge_label"
+        case badgeColor = "badge_color"
+    }
+
+    init(
+        id: String,
+        email: String,
+        username: String,
+        displayName: String? = nil,
+        avatarUrl: String? = nil,
+        createdAt: Date? = nil,
+        usernameIsGenerated: Bool = false,
+        badge: String? = nil,
+        badgeLabel: String? = nil,
+        badgeColor: String? = nil
+    ) {
+        self.id = id
+        self.email = email
+        self.username = username
+        self.displayName = displayName
+        self.avatarUrl = avatarUrl
+        self.createdAt = createdAt
+        self.usernameIsGenerated = usernameIsGenerated
+        self.badge = badge
+        self.badgeLabel = badgeLabel
+        self.badgeColor = badgeColor
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        email = try container.decode(String.self, forKey: .email)
+        username = try container.decode(String.self, forKey: .username)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        usernameIsGenerated = try container.decodeIfPresent(Bool.self, forKey: .usernameIsGenerated) ?? false
+        badge = try container.decodeIfPresent(String.self, forKey: .badge)
+        badgeLabel = try container.decodeIfPresent(String.self, forKey: .badgeLabel)
+        badgeColor = try container.decodeIfPresent(String.self, forKey: .badgeColor)
     }
 }
 
@@ -244,6 +291,7 @@ struct LedgerResponse: Decodable, Identifiable {
     let ownerId: String
     let currency: String?
     let requireConfirmation: Bool
+    let coverUrl: String?
     let createdAt: Date?
     let updatedAt: Date?
     let memberCount: Int?
@@ -255,6 +303,7 @@ struct LedgerResponse: Decodable, Identifiable {
         case ownerId = "owner_id"
         case currency
         case requireConfirmation = "require_confirmation"
+        case coverUrl = "cover_url"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case memberCount = "member_count"
@@ -268,6 +317,7 @@ struct LedgerResponse: Decodable, Identifiable {
         ownerId = try container.decode(String.self, forKey: .ownerId)
         currency = try container.decodeIfPresent(String.self, forKey: .currency)
         requireConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requireConfirmation) ?? true
+        coverUrl = try container.decodeIfPresent(String.self, forKey: .coverUrl)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
         memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount)
@@ -285,6 +335,7 @@ struct LedgerWithMembers: Decodable {
     let ownerId: String
     let currency: String?
     let requireConfirmation: Bool
+    let coverUrl: String?
     let createdAt: Date?
     let members: [MemberResponse]
 
@@ -294,6 +345,7 @@ struct LedgerWithMembers: Decodable {
         case ownerId = "owner_id"
         case currency
         case requireConfirmation = "require_confirmation"
+        case coverUrl = "cover_url"
         case createdAt = "created_at"
         case members
     }
@@ -305,6 +357,7 @@ struct LedgerWithMembers: Decodable {
         ownerId = try container.decode(String.self, forKey: .ownerId)
         currency = try container.decodeIfPresent(String.self, forKey: .currency)
         requireConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requireConfirmation) ?? true
+        coverUrl = try container.decodeIfPresent(String.self, forKey: .coverUrl)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         members = try container.decodeIfPresent([MemberResponse].self, forKey: .members) ?? []
     }

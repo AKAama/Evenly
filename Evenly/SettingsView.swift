@@ -45,8 +45,11 @@ struct SettingsView: View {
                                     size: 60
                                 )
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
-                                        .font(.headline)
+                                    HStack(spacing: 6) {
+                                        Text(auth.userProfile?.displayName ?? user.displayName ?? "用户")
+                                            .font(.headline)
+                                        UserBadgeChip(key: user.badge, label: user.badgeLabel, colorName: user.badgeColor)
+                                    }
                                         .dynamicTypeSize(.accessibility2)
                                     Text("@\(user.username)")
                                         .font(.subheadline)
@@ -488,6 +491,7 @@ private struct AvatarPreviewView: View {
     private var normalizedAvatarURL: URL? {
         guard let avatarUrl, !avatarUrl.isEmpty else { return nil }
         guard var components = URLComponents(string: avatarUrl) else { return nil }
+        // Host rewrite centralized in EvenlyMediaURL (covers + avatars).
         if components.host == "cos.ismyh.cn" {
             components.host = "evenly-1325650734.cos.ap-nanjing.myqcloud.com"
         }

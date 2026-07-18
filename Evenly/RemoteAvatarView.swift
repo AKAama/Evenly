@@ -37,16 +37,7 @@ struct RemoteAvatarView: View {
     }
 
     private var validURL: URL? {
-        guard let avatarUrl, !avatarUrl.isEmpty else { return nil }
-        guard var components = URLComponents(string: avatarUrl) else { return nil }
-
-        // Historical avatar URLs used a custom COS domain whose certificate
-        // may be unavailable. The object path is identical on the bucket's
-        // official HTTPS endpoint, so old profiles remain readable.
-        if components.host == "cos.ismyh.cn" {
-            components.host = "evenly-1325650734.cos.ap-nanjing.myqcloud.com"
-        }
-        return components.url
+        EvenlyMediaURL.resolve(avatarUrl)
     }
 
     private var fallback: some View {

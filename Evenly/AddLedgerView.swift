@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct AddLedgerView: View {
     @Environment(\.dismiss) var dismiss
@@ -16,6 +18,9 @@ struct AddLedgerView: View {
     @State private var showSaveError = false
     /// Default on for multi-person trust; owner can turn off anytime.
     @State private var requireConfirmation = true
+    @State private var coverImage: UIImage?
+    @State private var coverPickerItem: PhotosPickerItem?
+    @State private var isPickingCover = false
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -83,6 +88,45 @@ struct AddLedgerView: View {
                     }
                 } header: {
                     Text("账本名称")
+                }
+
+                Section {
+                    HStack(alignment: .center, spacing: 16) {
+                        coverPreview
+                            .frame(width: 72, height: 106)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(coverImage == nil ? "可选，会出现在账本列表封面" : "已选择封面")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                PhotosPicker(selection: $coverPickerItem, matching: .images) {
+                                    Label(coverImage == nil ? "选择封面" : "更换", systemImage: "photo")
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(EvenlyStyle.brandBlue)
+
+                                if coverImage != nil {
+                                    Button("清除") {
+                                        coverImage = nil
+                                        coverPickerItem = nil
+                                        HapticManager.selectionChanged()
+                                    }
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("封面")
+                } footer: {
+                    Text("不选则使用默认封面色；创建后可在账本列表长按修改。")
                 }
 
                 Section {
@@ -180,6 +224,10 @@ struct AddLedgerView: View {
             .scrollDismissesKeyboard(.interactively)
             .task(id: participantInput) {
                 await searchParticipants()
+            }
+            .onChange(of: coverPickerItem) { _, item in
+                guard let item else { return }
+                Task { await loadCover(from: item) }
             }
             .navigationTitle(existingLedger == nil ? "新建账本" : "编辑账本")
             .navigationBarTitleDisplayMode(.inline)
@@ -387,21 +435,93 @@ struct AddLedgerView: View {
             isSaving = false
             dismiss()
         } else {
-            // 创建模式
+            // 创建模式：先建账本，再上传可选封面（同一 COS 接口）。
             ledgerStore.createLedger(ledger) { result in
-                DispatchQueue.main.async {
-                    self.isSaving = false
-
-                    switch result {
-                    case .failure(let error):
+                switch result {
+                case .failure(let error):
+                    DispatchQueue.main.async {
+                        self.isSaving = false
                         self.saveError = error.localizedDescription
                         self.showSaveError = true
                         HapticManager.notificationOccurred(.error)
-                    case .success(let createdLedger):
-                        self.onSave?(createdLedger)
-                        self.dismiss()
                     }
+                case .success(let createdLedger):
+                    self.uploadCoverIfNeeded(for: createdLedger)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverPreview: some View {
+        if let coverImage {
+            Image(uiImage: coverImage)
+                .resizable()
+                .scaledToFill()
+        } else {
+            // Preview default generated spine style (placeholder book).
+            let palette = LedgerBookCoverStyle.colors(for: existingLedger?.id ?? UUID())
+            ZStack {
+                LinearGradient(
+                    colors: [palette.0, palette.1],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                VStack(spacing: 4) {
+                    Image(systemName: "book.closed.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text(title.isEmpty ? "封面" : String(title.prefix(4)))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 6)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func loadCover(from item: PhotosPickerItem) async {
+        isPickingCover = true
+        defer { isPickingCover = false }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { return }
+            coverImage = image
+            HapticManager.impact(.light)
+        } catch {
+            saveError = "无法读取封面图片"
+            showSaveError = true
+        }
+    }
+
+    /// After create succeeds, push cover bytes if user picked one; always dismiss.
+    private func uploadCoverIfNeeded(for created: Ledger) {
+        guard let coverImage,
+              let jpeg = LedgerCoverImagePrep.jpegData(from: coverImage) else {
+            DispatchQueue.main.async {
+                self.isSaving = false
+                self.onSave?(created)
+                HapticManager.notificationOccurred(.success)
+                self.dismiss()
+            }
+            return
+        }
+        ledgerStore.uploadLedgerCover(created, imageData: jpeg) { result in
+            DispatchQueue.main.async {
+                self.isSaving = false
+                switch result {
+                case .success(let withCover):
+                    self.onSave?(withCover)
+                    HapticManager.notificationOccurred(.success)
+                case .failure:
+                    // Ledger exists; cover is optional — still open it. User can long-press on shelf to retry.
+                    self.onSave?(created)
+                    HapticManager.notificationOccurred(.warning)
+                }
+                self.dismiss()
             }
         }
     }

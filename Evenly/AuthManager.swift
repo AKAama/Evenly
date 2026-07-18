@@ -99,7 +99,10 @@ class AuthManager: ObservableObject {
                 let bodyString = formData.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }.joined(separator: "&")
                 request.httpBody = bodyString.data(using: .utf8)
 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                // Use APIClient session timeouts (not URLSession.shared defaults).
+                var timedRequest = request
+                timedRequest.timeoutInterval = 15
+                let (data, response) = try await URLSession.shared.data(for: timedRequest)
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw APIError.invalidResponse
@@ -143,12 +146,25 @@ class AuthManager: ObservableObject {
 
             } catch {
                 await MainActor.run {
-                    self.loginError = error.localizedDescription
+                    self.loginError = Self.friendlyNetworkError(error)
                     self.isLoading = false
                 }
                 completion(error)
             }
         }
+    }
+
+    private static func friendlyNetworkError(_ error: Error) -> String {
+        let ns = error as NSError
+        let isTimeout = (error as? URLError)?.code == .timedOut
+            || ns.domain == NSURLErrorDomain && ns.code == NSURLErrorTimedOut
+        let isOffline = (error as? URLError)?.code == .notConnectedToInternet
+            || (error as? URLError)?.code == .networkConnectionLost
+            || (error as? URLError)?.code == .cannotConnectToHost
+        if isTimeout || isOffline {
+            return "网络超时，请检查网络后重试"
+        }
+        return error.localizedDescription
     }
 
     func prepareAppleSignIn(_ request: ASAuthorizationAppleIDRequest) {

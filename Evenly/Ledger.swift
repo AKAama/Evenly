@@ -91,10 +91,12 @@ struct Ledger: Identifiable, Codable {
     var expenseCount: Int
     /// When true, bills need participant confirmation before settlement/share.
     var requireConfirmation: Bool
+    /// Custom bookshelf cover (COS URL), same storage style as avatars.
+    var coverUrl: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, ownerId, memberIds, participants, expenses, members
-        case memberCount, expenseCount, requireConfirmation
+        case memberCount, expenseCount, requireConfirmation, coverUrl
     }
 
     init(
@@ -107,7 +109,8 @@ struct Ledger: Identifiable, Codable {
         members: [MemberResponse]? = nil,
         memberCount: Int? = nil,
         expenseCount: Int? = nil,
-        requireConfirmation: Bool = true
+        requireConfirmation: Bool = true,
+        coverUrl: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -119,6 +122,7 @@ struct Ledger: Identifiable, Codable {
         self.memberCount = memberCount ?? participants.count
         self.expenseCount = expenseCount ?? expenses.count
         self.requireConfirmation = requireConfirmation
+        self.coverUrl = coverUrl
     }
 
     init(from decoder: Decoder) throws {
@@ -133,6 +137,7 @@ struct Ledger: Identifiable, Codable {
         memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount) ?? participants.count
         expenseCount = try container.decodeIfPresent(Int.self, forKey: .expenseCount) ?? expenses.count
         requireConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requireConfirmation) ?? true
+        coverUrl = try container.decodeIfPresent(String.self, forKey: .coverUrl)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -147,6 +152,7 @@ struct Ledger: Identifiable, Codable {
         try container.encode(memberCount, forKey: .memberCount)
         try container.encode(expenseCount, forKey: .expenseCount)
         try container.encode(requireConfirmation, forKey: .requireConfirmation)
+        try container.encodeIfPresent(coverUrl, forKey: .coverUrl)
     }
 
     // Create from LedgerResponse
@@ -161,6 +167,7 @@ struct Ledger: Identifiable, Codable {
         self.memberCount = response.memberCount ?? 0
         self.expenseCount = response.expenseCount ?? 0
         self.requireConfirmation = response.requireConfirmation
+        self.coverUrl = response.coverUrl
     }
 
     // Create from LedgerWithMembers
@@ -176,6 +183,7 @@ struct Ledger: Identifiable, Codable {
         self.memberCount = activeMembers.count
         self.expenseCount = 0
         self.requireConfirmation = response.requireConfirmation
+        self.coverUrl = response.coverUrl
     }
 
     /// Expenses that shape transfer flow / share money math.

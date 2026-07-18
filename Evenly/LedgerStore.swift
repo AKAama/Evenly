@@ -344,12 +344,26 @@ final class LedgerStore: ObservableObject {
 
     func applyUpdatedLedger(_ ledger: Ledger) {
         var ledger = ledger
-        ledger.memberCount = ledger.participants.count
-        if let existing = ledgers.first(where: { $0.id == ledger.id }), ledger.expenses.isEmpty {
-            ledger.expenses = existing.expenses
-            ledger.expenseCount = existing.expenseCount
+        if let existing = ledgers.first(where: { $0.id == ledger.id }) {
+            if ledger.expenses.isEmpty {
+                ledger.expenses = existing.expenses
+                ledger.expenseCount = existing.expenseCount
+            } else {
+                ledger.expenseCount = ledger.expenses.count
+            }
+            if ledger.participants.isEmpty, !existing.participants.isEmpty {
+                ledger.participants = existing.participants
+                ledger.members = existing.members
+                ledger.memberIds = existing.memberIds
+                ledger.memberCount = existing.participants.filter(\.isActive).count
+            } else if !ledger.participants.isEmpty {
+                ledger.memberCount = ledger.participants.filter(\.isActive).count
+            }
         } else {
-            ledger.expenseCount = ledger.expenses.count
+            if !ledger.participants.isEmpty {
+                ledger.memberCount = ledger.participants.filter(\.isActive).count
+            }
+            ledger.expenseCount = ledger.expenses.isEmpty ? ledger.expenseCount : ledger.expenses.count
         }
 
         if let index = ledgers.firstIndex(where: { $0.id == ledger.id }) {
@@ -361,6 +375,7 @@ final class LedgerStore: ObservableObject {
         if currentLedger?.id == ledger.id {
             currentLedger = ledger
         }
+        persistLedgersCache()
     }
 
     // MARK: - Ledger Operations
@@ -624,6 +639,72 @@ final class LedgerStore: ObservableObject {
                     updated.expenses = ledger.expenses
                 }
                 updated.expenseCount = updated.expenses.count
+                await MainActor.run {
+                    self.applyUpdatedLedger(updated)
+                    completion(.success(updated))
+                }
+            } catch {
+                await MainActor.run { completion(.failure(error)) }
+            }
+        }
+    }
+
+    /// Owner uploads a custom bookshelf cover (COS, same pipeline as avatars).
+    func uploadLedgerCover(
+        _ ledger: Ledger,
+        imageData: Data,
+        completion: @escaping (Result<Ledger, Error>) -> Void
+    ) {
+        Task {
+            do {
+                let response: LedgerWithMembers = try await api.requestWithFormData(
+                    endpoint: APIEndpoints.ledgerCover(id: ledger.id.uuidString),
+                    method: .post,
+                    formFields: [:],
+                    files: [
+                        FileUpload(
+                            fieldName: "file",
+                            filename: "cover.jpg",
+                            mimeType: "image/jpeg",
+                            data: imageData
+                        ),
+                    ],
+                    requiresAuth: true
+                )
+                var updated = Ledger(from: response)
+                updated.expenses = ledger.expenses
+                updated.expenseCount = ledger.expenseCount
+                // Ensure cover sticks even if merge logic is conservative.
+                updated.coverUrl = response.coverUrl ?? updated.coverUrl
+                await MainActor.run {
+                    self.applyUpdatedLedger(updated)
+                    // Re-read from store so UI binds to the canonical row.
+                    let stored = self.ledgers.first(where: { $0.id == updated.id }) ?? updated
+                    completion(.success(stored))
+                }
+            } catch {
+                await MainActor.run { completion(.failure(error)) }
+            }
+        }
+    }
+
+    /// Owner removes custom cover (falls back to generated book style).
+    func clearLedgerCover(
+        _ ledger: Ledger,
+        completion: @escaping (Result<Ledger, Error>) -> Void
+    ) {
+        Task {
+            do {
+                let response: LedgerWithMembers = try await api.request(
+                    endpoint: APIEndpoints.ledgerCover(id: ledger.id.uuidString),
+                    method: .delete,
+                    requiresAuth: true
+                )
+                var updated = Ledger(from: response)
+                updated.expenses = ledger.expenses
+                updated.expenseCount = ledger.expenseCount
+                // Explicit clear — do not keep a stale local URL.
+                updated.coverUrl = response.coverUrl
                 await MainActor.run {
                     self.applyUpdatedLedger(updated)
                     completion(.success(updated))

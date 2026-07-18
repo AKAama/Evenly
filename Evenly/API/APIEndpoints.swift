@@ -41,6 +41,9 @@ enum APIEndpoints {
     static func ledger(id: String) -> String {
         "/ledgers/\(id)"
     }
+    static func ledgerCover(id: String) -> String {
+        "/ledgers/\(id)/cover"
+    }
     static func ledgerOverview(id: String) -> String {
         "/ledgers/\(id)/overview"
     }

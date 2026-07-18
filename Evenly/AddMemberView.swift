@@ -296,6 +296,9 @@ struct AddMemberView: View {
                         .font(.body)
                         .dynamicTypeSize(.accessibility2)
                         .foregroundStyle((participant.isPending || participant.isRejected) ? .secondary : .primary)
+                    if let user = memberRecord(for: participant)?.user {
+                        UserBadgeChip(key: user.badge, label: user.badgeLabel, colorName: user.badgeColor)
+                    }
                     if participant.isPending {
                         Text("邀请中")
                             .font(.caption2)

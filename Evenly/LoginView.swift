@@ -321,8 +321,8 @@ struct LoginView: View {
         focusedField = nil
         HapticManager.impact(.medium)
         auth.signIn(identifier: auth.loginIdentifier, password: auth.loginPassword) { error in
-            if let error {
-                auth.loginError = error.localizedDescription
+            // AuthManager already sets loginError.
+            if error != nil {
                 HapticManager.notificationOccurred(.error)
             } else {
                 HapticManager.notificationOccurred(.success)

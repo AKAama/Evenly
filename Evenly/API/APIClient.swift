@@ -9,6 +9,59 @@ import Foundation
 import Combine
 import Security
 
+/// Accepts audit-style UTC (`…Z` / `+00:00`), fractional seconds (1–6 digits), and plain `yyyy-MM-dd`.
+/// File-level so `APIClient.jsonDecoder` static init does not need covariant `Self`.
+private func evenlyParseAPIDate(_ raw: String) -> Date? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let isoFrac = ISO8601DateFormatter()
+    isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let d = isoFrac.date(from: trimmed) { return d }
+
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime]
+    if let d = iso.date(from: trimmed) { return d }
+
+    var value = trimmed
+    if value.hasSuffix("Z") || value.hasSuffix("z") {
+        value = String(value.dropLast())
+    } else if let range = value.range(of: #"[+-]\d{2}:?\d{2}$"#, options: .regularExpression) {
+        value.removeSubrange(range)
+    }
+
+    if let dot = value.firstIndex(of: ".") {
+        let afterDot = value.index(after: dot)
+        let digits = value[afterDot...].prefix(while: { $0.isNumber })
+        if !digits.isEmpty {
+            let body = String(value[..<dot])
+            let frac = String(digits.prefix(6)).padding(toLength: 6, withPad: "0", startingAt: 0)
+            value = body + "." + frac
+        }
+    }
+
+    let posix = Locale(identifier: "en_US_POSIX")
+    let utc = TimeZone(secondsFromGMT: 0)
+
+    let fractional = DateFormatter()
+    fractional.locale = posix
+    fractional.timeZone = utc
+    fractional.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+
+    let seconds = DateFormatter()
+    seconds.locale = posix
+    seconds.timeZone = utc
+    seconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+
+    let dateOnly = DateFormatter()
+    dateOnly.locale = posix
+    dateOnly.timeZone = utc
+    dateOnly.dateFormat = "yyyy-MM-dd"
+
+    return fractional.date(from: value)
+        ?? seconds.date(from: value)
+        ?? dateOnly.date(from: value)
+}
+
 enum APIError: LocalizedError {
     case invalidURL
     case invalidResponse
@@ -114,25 +167,15 @@ final class APIClient: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-
-            let fractional = DateFormatter()
-            fractional.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-            fractional.locale = Locale(identifier: "en_US_POSIX")
-
-            let seconds = DateFormatter()
-            seconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-            seconds.locale = Locale(identifier: "en_US_POSIX")
-
-            let dateOnly = DateFormatter()
-            dateOnly.dateFormat = "yyyy-MM-dd"
-            dateOnly.locale = Locale(identifier: "en_US_POSIX")
-
-            if let date = fractional.date(from: value) ?? seconds.date(from: value) ?? dateOnly.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
+            let raw = try container.decode(String.self)
+            // File-level helper: cannot call Self.* from a static stored property initializer.
+            if let date = evenlyParseAPIDate(raw) {
                 return date
             }
-
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(value)")
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid date: \(raw)"
+            )
         }
         return decoder
     }()

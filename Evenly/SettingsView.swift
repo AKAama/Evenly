@@ -180,7 +180,7 @@ struct AccountSettingsView: View {
     @State private var showingAvatarPreview = false
     @State private var showingAvatarPicker = false
     @State private var showingAvatarEditor = false
-    @State private var showingDeleteAccountConfirmation = false
+    @State private var showingDeactivateFlow = false
 
     var body: some View {
         List {
@@ -257,17 +257,17 @@ struct AccountSettingsView: View {
                 Section {
                     Button(role: .destructive) {
                         HapticManager.notificationOccurred(.warning)
-                        showingDeleteAccountConfirmation = true
+                        showingDeactivateFlow = true
                     } label: {
                         HStack {
-                            Label("删除账户", systemImage: "person.crop.circle.badge.minus")
+                            Label("注销账号", systemImage: "person.crop.circle.badge.minus")
                             Spacer()
                             if isLoading { ProgressView() }
                         }
                     }
                     .disabled(isLoading)
                 } footer: {
-                    Text("删除账户将永久删除个人资料、拥有的账本及关联记录，且无法恢复。")
+                    Text("注销后无法登录。你参与过的账单会保留；你创建的账本将移交给其他成员，或在仅你一人时归档。")
                 }
             }
         }
@@ -302,14 +302,12 @@ struct AccountSettingsView: View {
                 fallbackText: auth.userProfile?.displayName ?? auth.user?.email ?? "?"
             )
         }
+        .fullScreenCover(isPresented: $showingDeactivateFlow) {
+            AccountDeactivationFlowView()
+                .environmentObject(auth)
+        }
         .photosPicker(isPresented: $showingAvatarPicker, selection: $avatarItem, matching: .images)
         .alert(alertTitle, isPresented: $showingAlert) { Button("确定", role: .cancel) {} } message: { Text(alertMessage) }
-        .alert("永久删除账户？", isPresented: $showingDeleteAccountConfirmation) {
-            Button("取消", role: .cancel) {}
-            Button("永久删除", role: .destructive) { deleteAccount() }
-        } message: {
-            Text("你的个人资料、拥有的账本、共享账本中的关联记录将被永久删除。此操作无法撤销。")
-        }
         .onAppear { auth.refreshAuthMethods() }
     }
 
@@ -383,14 +381,253 @@ struct AccountSettingsView: View {
         showingAlert = true
     }
 
-    private func deleteAccount() {
-        isLoading = true
-        auth.deleteAccount { error in
-            isLoading = false
-            if let error = error {
-                alertTitle = "错误"
-                alertMessage = error.localizedDescription
-                showingAlert = true
+}
+
+// MARK: - Account deactivation flow
+
+private struct AccountDeactivationFlowView: View {
+    @EnvironmentObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var phase: Phase = .loading
+    @State private var preview: DeactivationPreviewResponse?
+    @State private var selectedOwners: [String: String] = [:] // ledgerId -> userId
+    @State private var acknowledgedArchive = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+    @State private var results: [DeactivateTransferResult] = []
+
+    private enum Phase {
+        case loading
+        case review
+        case result
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch phase {
+                case .loading:
+                    ProgressView("正在检查账本…")
+                case .review:
+                    reviewContent
+                case .result:
+                    resultContent
+                }
+            }
+            .navigationTitle(phase == .result ? "注销结果" : "注销账号")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if phase != .result {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                            .disabled(isSubmitting)
+                    }
+                }
+            }
+            .alert("无法注销", isPresented: Binding(
+                get: { errorMessage != nil && phase != .result },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("确定", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
+        }
+        .interactiveDismissDisabled(isSubmitting || phase == .result)
+        .task { await loadPreview() }
+    }
+
+    @ViewBuilder
+    private var reviewContent: some View {
+        let transferCount = preview?.ownedLedgersRequiringTransfer.count ?? 0
+        let archiveCount = preview?.ownedLedgersToArchive.count ?? 0
+
+        List {
+            Section {
+                Text("注销后你将无法再登录。你在他人账本中的历史账单会保留，显示为「你的名字（已注销）」。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if transferCount > 0 {
+                Section {
+                    ForEach(preview?.ownedLedgersRequiringTransfer ?? []) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(item.ledgerName).font(.headline)
+                            Text("需移交管理员")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker(
+                                "新管理员",
+                                selection: Binding(
+                                    get: {
+                                        selectedOwners[item.ledgerId]
+                                            ?? item.defaultSuccessor?.userId
+                                            ?? ""
+                                    },
+                                    set: { selectedOwners[item.ledgerId] = $0 }
+                                )
+                            ) {
+                                ForEach(item.candidates) { c in
+                                    Text("\(c.displayName) (@\(c.username))").tag(c.userId)
+                                }
+                            }
+                            .labelsHidden()
+                            if let d = item.defaultSuccessor {
+                                Text("系统默认：\(d.displayName)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("待移交（\(transferCount)）")
+                } footer: {
+                    Text("不选择时，将移交给除你以外最早加入该账本的成员。")
+                }
+            }
+
+            if archiveCount > 0 {
+                Section {
+                    ForEach(preview?.ownedLedgersToArchive ?? []) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.ledgerName).font(.headline)
+                            Text("仅你一人，注销后将归档并由平台保管")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Toggle("我已知晓上述账本将被归档", isOn: $acknowledgedArchive)
+                } header: {
+                    Text("将归档（\(archiveCount)）")
+                }
+            }
+
+            if transferCount == 0 && archiveCount == 0 {
+                Section {
+                    Text("你当前没有需要移交或归档的账本。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    confirmDeactivate()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Text("确认注销")
+                                .fontWeight(.semibold)
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(!canSubmit || isSubmitting)
+            } footer: {
+                Text("此操作不可恢复，请确认后再继续。")
+            }
+        }
+    }
+
+    private var canSubmit: Bool {
+        let archiveCount = preview?.ownedLedgersToArchive.count ?? 0
+        if archiveCount > 0 && !acknowledgedArchive { return false }
+        return true
+    }
+
+    private var resultContent: some View {
+        List {
+            Section {
+                Text("账号已注销。请截图保存下列结果，关闭后将返回登录页。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Section("处理结果") {
+                if results.isEmpty {
+                    Text("无账本需要移交或归档")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(results) { row in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(row.ledgerName).font(.headline)
+                            if row.action == "transfer", let owner = row.newOwner {
+                                Text("已移交给 \(owner.displayName) (@\(owner.username))")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            } else if row.action == "archive" {
+                                Text("已归档（仅你一人）")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text(row.action)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            Section {
+                Button {
+                    dismiss()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("完成并退出")
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadPreview() async {
+        phase = .loading
+        do {
+            let p = try await auth.fetchDeactivationPreview()
+            await MainActor.run {
+                preview = p
+                for item in p.ownedLedgersRequiringTransfer {
+                    if selectedOwners[item.ledgerId] == nil {
+                        selectedOwners[item.ledgerId] = item.defaultSuccessor?.userId
+                    }
+                }
+                phase = .review
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                phase = .review
+            }
+        }
+    }
+
+    private func confirmDeactivate() {
+        guard canSubmit else { return }
+        isSubmitting = true
+        errorMessage = nil
+        var transfers: [DeactivateOwnerTransfer] = []
+        for item in preview?.ownedLedgersRequiringTransfer ?? [] {
+            let chosen = selectedOwners[item.ledgerId] ?? item.defaultSuccessor?.userId
+            transfers.append(DeactivateOwnerTransfer(ledgerId: item.ledgerId, newOwnerId: chosen))
+        }
+        auth.deactivateAccount(ownerTransfers: transfers) { result in
+            isSubmitting = false
+            switch result {
+            case .success(let response):
+                results = response.transfers
+                phase = .result
+                HapticManager.notificationOccurred(.success)
+            case .failure(let error):
+                errorMessage = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
             }
         }
     }

@@ -183,11 +183,20 @@ struct UserBadgeChip: View {
     // MARK: - Color mapping
 
     static func color(from name: String?) -> Color? {
-        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+        guard var name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
             return nil
         }
-        if name.hasPrefix("#"), name.count == 7 {
-            return Color(hex: name)
+        // Accept #RGB / #RRGGBB / RRGGBB
+        if name.hasPrefix("#") {
+            if name.count == 4 { // #RGB → #RRGGBB
+                let r = name[name.index(name.startIndex, offsetBy: 1)]
+                let g = name[name.index(name.startIndex, offsetBy: 2)]
+                let b = name[name.index(name.startIndex, offsetBy: 3)]
+                name = "#\(r)\(r)\(g)\(g)\(b)\(b)"
+            }
+            if name.count == 7 { return Color(hex: name) }
+        } else if name.count == 6, name.range(of: #"^[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil {
+            return Color(hex: "#\(name)")
         }
         switch name.lowercased() {
         case "gold": return Color(red: 0.82, green: 0.62, blue: 0.18)

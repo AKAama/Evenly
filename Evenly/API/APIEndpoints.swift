@@ -29,12 +29,68 @@ enum APIEndpoints {
     static let sendEmailChange = "/users/me/email/send-verification"
     static let changeEmail = "/users/me/email"
     static let deleteAccount = "/users/me"
+    static let deactivationPreview = "/users/me/deactivation-preview"
+    static let deactivateAccount = "/users/me/deactivate"
     static func pushDevice(token: String) -> String {
         "/users/me/push-devices/\(token)"
     }
     static func searchUsers(q: String, limit: Int = 20) -> String {
         "/users/search?q=\(q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q)&limit=\(limit)"
     }
+
+    // MARK: - Platform admin (ops accounts)
+    static func adminUsers(
+        q: String? = nil,
+        accountKind: String? = nil,
+        badge: String? = nil,
+        limit: Int = 100
+    ) -> String {
+        var parts = ["limit=\(limit)"]
+        if let q, !q.isEmpty,
+           let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            parts.append("q=\(encoded)")
+        }
+        if let accountKind, !accountKind.isEmpty {
+            parts.append("account_kind=\(accountKind)")
+        }
+        if let badge, !badge.isEmpty,
+           let encoded = badge.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            parts.append("badge=\(encoded)")
+        }
+        return "/admin/users?\(parts.joined(separator: "&"))"
+    }
+
+    static func adminLedgers(q: String? = nil, status: String? = nil, limit: Int = 100) -> String {
+        var parts = ["limit=\(limit)"]
+        if let q, !q.isEmpty,
+           let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            parts.append("q=\(encoded)")
+        }
+        if let status, !status.isEmpty {
+            parts.append("status=\(status)")
+        }
+        return "/admin/ledgers?\(parts.joined(separator: "&"))"
+    }
+
+    static func adminUser(id: String) -> String { "/admin/users/\(id)" }
+    static func adminLedgerOverview(id: String) -> String { "/admin/ledgers/\(id)/overview" }
+    static func adminDeactivateUser(id: String) -> String { "/admin/users/\(id)/deactivate" }
+    static func adminResetPassword(id: String) -> String { "/admin/users/\(id)/reset-password" }
+    static func adminSetBadge(id: String) -> String { "/admin/users/\(id)/badge" }
+    static let adminBadges = "/admin/badges"
+    static func adminBadge(id: String) -> String { "/admin/badges/\(id)" }
+    static func adminAuditEvents(day: String?, source: String? = nil, limit: Int = 200) -> String {
+        var parts = ["limit=\(limit)"]
+        if let day { parts.append("day=\(day)") }
+        if let source, !source.isEmpty { parts.append("source=\(source)") }
+        return "/admin/audit-events?\(parts.joined(separator: "&"))"
+    }
+    static func adminAuditSummary(day: String?) -> String {
+        var parts: [String] = []
+        if let day { parts.append("day=\(day)") }
+        return parts.isEmpty ? "/admin/audit-events/summary" : "/admin/audit-events/summary?\(parts.joined(separator: "&"))"
+    }
+    static let adminPlatformUsers = "/admin/platform-users"
 
     // MARK: - Ledgers
     static let ledgers = "/ledgers"

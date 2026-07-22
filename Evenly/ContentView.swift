@@ -149,23 +149,28 @@ struct ContentView: View {
     private var contentRoot: some View {
         Group {
             if auth.user != nil {
-                TabView(selection: $selectedTab) {
-                    ledgerTabView
-                        .tabItem {
-                            Label("账本", systemImage: "book.fill")
-                        }
-                        .tag(0)
+                if auth.isPlatformUser {
+                    // Same login page; platform accounts get an ops shell instead of ledgers.
+                    PlatformConsoleRootView()
+                } else {
+                    TabView(selection: $selectedTab) {
+                        ledgerTabView
+                            .tabItem {
+                                Label("账本", systemImage: "book.fill")
+                            }
+                            .tag(0)
 
-                    SettingsView()
-                        .tabItem {
-                            Label("设置", systemImage: "gearshape.fill")
-                        }
-                        .tag(1)
-                }
-                .tint(EvenlyStyle.brandBlue)
-                // Keep invite banner above every tab so it is not limited to the ledger screen.
-                .safeAreaInset(edge: .top) {
-                    invitationBanner
+                        SettingsView()
+                            .tabItem {
+                                Label("设置", systemImage: "gearshape.fill")
+                            }
+                            .tag(1)
+                    }
+                    .tint(EvenlyStyle.brandBlue)
+                    // Keep invite banner above every tab so it is not limited to the ledger screen.
+                    .safeAreaInset(edge: .top) {
+                        invitationBanner
+                    }
                 }
             } else if auth.isGuestMode {
                 GuestModeView()
@@ -180,10 +185,15 @@ struct ContentView: View {
             if let userID {
                 // Always land on the ledger tab after login / session restore.
                 selectedTab = 0
-                ledgerStore.bind(userId: userID)
-                Task { await notifications.requestAuthorizationAndRegister() }
-                routePendingNotification()
-                consumePendingJoinTokenIfNeeded()
+                if auth.isPlatformUser {
+                    // Ops accounts do not participate in ledgers / guest data.
+                    ledgerStore.stop()
+                } else {
+                    ledgerStore.bind(userId: userID)
+                    Task { await notifications.requestAuthorizationAndRegister() }
+                    routePendingNotification()
+                    consumePendingJoinTokenIfNeeded()
+                }
             } else {
                 ledgerStore.stop()
             }

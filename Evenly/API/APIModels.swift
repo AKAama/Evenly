@@ -106,6 +106,26 @@ struct UserResponse: Codable, Identifiable {
     let badgeLabel: String?
     /// Ant Design color name or #hex
     let badgeColor: String?
+    /// active | deactivated
+    let status: String?
+    /// Includes （已注销） when deactivated
+    let publicDisplayName: String?
+    /// app | platform
+    let accountKind: String?
+    /// True for platform ops accounts
+    let isAdmin: Bool?
+
+    /// Prefer server public label when present.
+    var resolvedDisplayName: String {
+        if let publicDisplayName, !publicDisplayName.isEmpty { return publicDisplayName }
+        return displayName ?? username
+    }
+
+    /// Platform ops console account (not a normal ledger user).
+    var isPlatformAccount: Bool {
+        if (accountKind ?? "app") == "platform" { return true }
+        return isAdmin == true
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -118,6 +138,10 @@ struct UserResponse: Codable, Identifiable {
         case badge
         case badgeLabel = "badge_label"
         case badgeColor = "badge_color"
+        case status
+        case publicDisplayName = "public_display_name"
+        case accountKind = "account_kind"
+        case isAdmin = "is_admin"
     }
 
     init(
@@ -130,7 +154,11 @@ struct UserResponse: Codable, Identifiable {
         usernameIsGenerated: Bool = false,
         badge: String? = nil,
         badgeLabel: String? = nil,
-        badgeColor: String? = nil
+        badgeColor: String? = nil,
+        status: String? = "active",
+        publicDisplayName: String? = nil,
+        accountKind: String? = "app",
+        isAdmin: Bool? = false
     ) {
         self.id = id
         self.email = email
@@ -142,6 +170,10 @@ struct UserResponse: Codable, Identifiable {
         self.badge = badge
         self.badgeLabel = badgeLabel
         self.badgeColor = badgeColor
+        self.status = status
+        self.publicDisplayName = publicDisplayName
+        self.accountKind = accountKind
+        self.isAdmin = isAdmin
     }
 
     init(from decoder: Decoder) throws {
@@ -156,7 +188,323 @@ struct UserResponse: Codable, Identifiable {
         badge = try container.decodeIfPresent(String.self, forKey: .badge)
         badgeLabel = try container.decodeIfPresent(String.self, forKey: .badgeLabel)
         badgeColor = try container.decodeIfPresent(String.self, forKey: .badgeColor)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        publicDisplayName = try container.decodeIfPresent(String.self, forKey: .publicDisplayName)
+        accountKind = try container.decodeIfPresent(String.self, forKey: .accountKind)
+        isAdmin = try container.decodeIfPresent(Bool.self, forKey: .isAdmin)
     }
+}
+
+// MARK: - Platform admin (iOS ops shell)
+
+struct AdminUserListResponse: Codable {
+    let total: Int
+    let items: [AdminUserListItem]
+}
+
+struct AdminUserListItem: Codable, Identifiable {
+    let id: String
+    let email: String
+    let username: String
+    let displayName: String?
+    let publicDisplayName: String?
+    let avatarUrl: String?
+    let accountKind: String?
+    let status: String?
+    let badge: String?
+    let badgeLabel: String?
+    let badgeColor: String?
+    let membershipCount: Int?
+    let ownedLedgerCount: Int?
+    let expenseCreatedCount: Int?
+    let createdAt: Date?
+
+    var listTitle: String {
+        publicDisplayName ?? displayName ?? username
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, email, username, badge, status
+        case displayName = "display_name"
+        case publicDisplayName = "public_display_name"
+        case avatarUrl = "avatar_url"
+        case accountKind = "account_kind"
+        case badgeLabel = "badge_label"
+        case badgeColor = "badge_color"
+        case membershipCount = "membership_count"
+        case ownedLedgerCount = "owned_ledger_count"
+        case expenseCreatedCount = "expense_created_count"
+        case createdAt = "created_at"
+    }
+}
+
+struct AdminLedgerListResponse: Codable {
+    let total: Int
+    let items: [AdminLedgerListItem]
+}
+
+struct AdminLedgerListItem: Codable, Identifiable {
+    let id: String
+    let name: String
+    let ownerId: String?
+    let currency: String?
+    let status: String?
+    let ownerLabel: String?
+    let ownerEmail: String?
+    let memberCount: Int?
+    let expenseCount: Int?
+    let totalSpend: Double?
+    let createdAt: Date?
+    /// Archived with no living registered members — display tag only.
+    let isOrphan: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, currency, status
+        case ownerId = "owner_id"
+        case ownerLabel = "owner_label"
+        case ownerEmail = "owner_email"
+        case memberCount = "member_count"
+        case expenseCount = "expense_count"
+        case totalSpend = "total_spend"
+        case createdAt = "created_at"
+        case isOrphan = "is_orphan"
+    }
+}
+
+struct AdminBadgeItem: Codable, Identifiable {
+    let id: String
+    let key: String
+    let label: String
+    let description: String?
+    let color: String?
+    let sortOrder: Int?
+    let isActive: Bool?
+    let userCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, key, label, description, color
+        case sortOrder = "sort_order"
+        case isActive = "is_active"
+        case userCount = "user_count"
+    }
+}
+
+struct AdminBadgeListResponse: Codable {
+    let items: [AdminBadgeItem]
+    let unassignedCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case unassignedCount = "unassigned_count"
+    }
+}
+
+struct AdminBadgeCreateBody: Encodable {
+    let label: String
+    let description: String?
+    let color: String
+    let key: String?
+}
+
+struct AdminBadgeUpdateBody: Encodable {
+    var label: String? = nil
+    var description: String? = nil
+    var color: String? = nil
+    var isActive: Bool? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case label, description, color
+        case isActive = "is_active"
+    }
+}
+
+struct AdminSetBadgeBody: Encodable {
+    let badge: String?
+}
+
+struct AdminResetPasswordBody: Encodable {
+    let newPassword: String
+    enum CodingKeys: String, CodingKey { case newPassword = "new_password" }
+}
+
+struct AdminResetPasswordResponse: Codable {
+    let message: String?
+    let userId: String?
+    let username: String?
+    enum CodingKeys: String, CodingKey {
+        case message
+        case userId = "user_id"
+        case username
+    }
+}
+
+struct AuditEventItem: Codable, Sendable, Identifiable {
+    let id: String
+    let createdAt: Date?
+    let actorLabel: String?
+    let action: String
+    let source: String?
+    let summary: String?
+    let ip: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, action, source, summary, ip
+        case createdAt = "created_at"
+        case actorLabel = "actor_label"
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let s = try? c.decode(String.self, forKey: .id) {
+            id = s
+        } else if let u = try? c.decode(UUID.self, forKey: .id) {
+            id = u.uuidString
+        } else {
+            throw DecodingError.dataCorruptedError(forKey: .id, in: c, debugDescription: "Invalid audit id")
+        }
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        actorLabel = try c.decodeIfPresent(String.self, forKey: .actorLabel)
+        action = try c.decode(String.self, forKey: .action)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        ip = try c.decodeIfPresent(String.self, forKey: .ip)
+    }
+}
+
+struct AuditEventListResponse: Codable, Sendable {
+    let day: String?
+    let total: Int
+    let items: [AuditEventItem]
+}
+
+struct AuditSummaryResponse: Codable, Sendable {
+    let total: Int?
+    let byAction: [AuditActionCount]?
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case byAction = "by_action"
+    }
+}
+
+struct AuditActionCount: Codable, Sendable, Identifiable {
+    var id: String { action }
+    let action: String
+    let count: Int
+}
+
+struct PlatformUserCreateBody: Encodable {
+    let email: String
+    let username: String
+    let password: String
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case email, username, password
+        case displayName = "display_name"
+    }
+}
+
+// MARK: - Account deactivation
+
+struct DeactivationMemberBrief: Codable, Identifiable, Hashable {
+    let userId: String
+    let displayName: String
+    let username: String
+
+    var id: String { userId }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case displayName = "display_name"
+        case username
+    }
+}
+
+struct DeactivationTransferPreview: Codable, Identifiable {
+    let ledgerId: String
+    let ledgerName: String
+    let memberCountRegisteredActive: Int
+    let defaultSuccessor: DeactivationMemberBrief?
+    let candidates: [DeactivationMemberBrief]
+
+    var id: String { ledgerId }
+
+    enum CodingKeys: String, CodingKey {
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case memberCountRegisteredActive = "member_count_registered_active"
+        case defaultSuccessor = "default_successor"
+        case candidates
+    }
+}
+
+struct DeactivationArchivePreview: Codable, Identifiable {
+    let ledgerId: String
+    let ledgerName: String
+    let action: String
+    let reason: String
+
+    var id: String { ledgerId }
+
+    enum CodingKeys: String, CodingKey {
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case action
+        case reason
+    }
+}
+
+struct DeactivationPreviewResponse: Codable {
+    let ownedLedgersRequiringTransfer: [DeactivationTransferPreview]
+    let ownedLedgersToArchive: [DeactivationArchivePreview]
+    let membershipLedgerCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case ownedLedgersRequiringTransfer = "owned_ledgers_requiring_transfer"
+        case ownedLedgersToArchive = "owned_ledgers_to_archive"
+        case membershipLedgerCount = "membership_ledger_count"
+    }
+}
+
+struct DeactivateOwnerTransfer: Encodable {
+    let ledgerId: String
+    let newOwnerId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ledgerId = "ledger_id"
+        case newOwnerId = "new_owner_id"
+    }
+}
+
+struct DeactivateAccountRequest: Encodable {
+    let ownerTransfers: [DeactivateOwnerTransfer]
+    let confirm: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ownerTransfers = "owner_transfers"
+        case confirm
+    }
+}
+
+struct DeactivateTransferResult: Codable, Identifiable {
+    let ledgerId: String
+    let ledgerName: String
+    let action: String
+    let newOwner: DeactivationMemberBrief?
+
+    var id: String { ledgerId }
+
+    enum CodingKeys: String, CodingKey {
+        case ledgerId = "ledger_id"
+        case ledgerName = "ledger_name"
+        case action
+        case newOwner = "new_owner"
+    }
+}
+
+struct DeactivateAccountResponse: Codable {
+    let transfers: [DeactivateTransferResult]
 }
 
 struct AuthMethodsResponse: Decodable {

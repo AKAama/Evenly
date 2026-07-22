@@ -22,6 +22,11 @@ class AuthManager: ObservableObject {
     @Published private(set) var authMethods: [String] = []
     @Published private(set) var hasPassword = true
 
+    /// Platform ops account — uses a separate iOS shell (not ledger tabs).
+    var isPlatformUser: Bool {
+        user?.isPlatformAccount == true
+    }
+
     // Login/Register state
     @Published var loginIdentifier = ""
     @Published var loginPassword = ""
@@ -643,31 +648,55 @@ class AuthManager: ObservableObject {
         completion(false)
     }
 
-    // MARK: - Delete Account
+    // MARK: - Account deactivation (soft)
 
-    func deleteAccount(completion: @escaping (Error?) -> Void) {
+    func fetchDeactivationPreview() async throws -> DeactivationPreviewResponse {
+        try await api.get(APIEndpoints.deactivationPreview)
+    }
+
+    /// Soft-deactivate: transfer/archive owned ledgers, keep shared history.
+    func deactivateAccount(
+        ownerTransfers: [DeactivateOwnerTransfer],
+        completion: @escaping (Result<DeactivateAccountResponse, Error>) -> Void
+    ) {
         guard user != nil else {
-            completion(NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"]))
+            completion(.failure(NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "未登录"])))
             return
         }
 
         isLoading = true
         Task {
             do {
-                try await api.delete(APIEndpoints.deleteAccount)
+                let body = DeactivateAccountRequest(ownerTransfers: ownerTransfers, confirm: true)
+                let result: DeactivateAccountResponse = try await api.post(
+                    APIEndpoints.deactivateAccount,
+                    body: body
+                )
                 await MainActor.run {
                     self.api.clearToken()
                     self.user = nil
                     self.userProfile = nil
                     self.avatarImage = nil
                     self.isLoading = false
-                    completion(nil)
+                    completion(.success(result))
                 }
             } catch {
                 await MainActor.run {
                     self.isLoading = false
-                    completion(error)
+                    completion(.failure(error))
                 }
+            }
+        }
+    }
+
+    /// Legacy entry: soft-deactivate with system defaults (no manual transfers).
+    func deleteAccount(completion: @escaping (Error?) -> Void) {
+        deactivateAccount(ownerTransfers: []) { result in
+            switch result {
+            case .success:
+                completion(nil)
+            case .failure(let error):
+                completion(error)
             }
         }
     }

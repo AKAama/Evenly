@@ -496,6 +496,7 @@ struct PlatformLedgerDetailSheet: View {
                 PlatformExpenseDetailSheet(expense: expense, members: membersForExpense)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+                    .platformLightChrome()
             }
         }
     }
@@ -662,6 +663,7 @@ struct PlatformBadgesView: View {
             } onCancel: {
                 editorMode = nil
             }
+            .platformLightChrome()
         }
         .alert(
             "删除铭牌？",

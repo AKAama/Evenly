@@ -42,6 +42,7 @@ extension View {
     func platformCard(padding: CGFloat = 16) -> some View {
         self
             .padding(padding)
+            .foregroundStyle(PlatformStyle.textPrimary)
             .background(PlatformStyle.card, in: RoundedRectangle(cornerRadius: PlatformStyle.cardRadius, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 12, y: 4)
             .shadow(color: Color.black.opacity(0.02), radius: 2, y: 1)
@@ -50,11 +51,19 @@ extension View {
     func platformSoftCard(padding: CGFloat = 16) -> some View {
         self
             .padding(padding)
+            .foregroundStyle(PlatformStyle.textPrimary)
             .background(PlatformStyle.cardMuted, in: RoundedRectangle(cornerRadius: PlatformStyle.cardRadius, style: .continuous))
     }
 
     func platformPressable() -> some View {
         buttonStyle(PlatformPressStyle())
+    }
+
+    /// Sheets presented from the ops shell should stay light even if app theme is dark.
+    func platformLightChrome() -> some View {
+        self
+            .preferredColorScheme(.light)
+            .tint(PlatformStyle.accentPurple)
     }
 }
 
@@ -70,45 +79,75 @@ struct PlatformPressStyle: ButtonStyle {
 
 struct PlatformConsoleRootView: View {
     @EnvironmentObject var auth: AuthManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedTab = 0
+
+    private var tabAnimation: Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.15)
+            : .spring(response: 0.42, dampingFraction: 0.86)
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             PlatformStyle.canvas.ignoresSafeArea()
 
-            Group {
-                switch selectedTab {
-                case 0:
-                    PlatformHomeView(selectedTab: $selectedTab)
-                case 1:
-                    PlatformUsersView()
-                case 2:
-                    PlatformLedgersView()
-                case 3:
-                    NavigationStack {
-                        PlatformBadgesView()
-                    }
-                default:
-                    PlatformMeView()
-                }
+            // Content cross-fade so page change feels less abrupt next to the sliding pill.
+            ZStack {
+                tabContent(for: selectedTab)
+                    .id(selectedTab)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: 10)).combined(with: .scale(scale: 0.985)),
+                                removal: .opacity.combined(with: .offset(y: -6))
+                            )
+                    )
             }
+            .animation(tabAnimation, value: selectedTab)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.bottom, PlatformStyle.tabBarHeight + 18)
 
             PlatformFloatingTabBar(
                 selectedTab: $selectedTab,
-                meInitial: String((auth.user?.resolvedDisplayName ?? auth.user?.username ?? "我").prefix(1))
+                meInitial: String((auth.user?.resolvedDisplayName ?? auth.user?.username ?? "我").prefix(1)),
+                animation: tabAnimation
             )
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
         }
+        // Ops shell is light-only. Re-assert here so sheets/nav chrome don't follow app dark theme.
         .preferredColorScheme(.light)
+        .tint(PlatformStyle.accentPurple)
+    }
+
+    @ViewBuilder
+    private func tabContent(for tab: Int) -> some View {
+        switch tab {
+        case 0:
+            PlatformHomeView(selectedTab: $selectedTab)
+        case 1:
+            PlatformUsersView()
+        case 2:
+            PlatformLedgersView()
+        case 3:
+            NavigationStack {
+                PlatformBadgesView()
+            }
+        default:
+            PlatformMeView()
+        }
     }
 }
 
 private struct PlatformFloatingTabBar: View {
     @Binding var selectedTab: Int
     var meInitial: String = "我"
+    var animation: Animation = .spring(response: 0.42, dampingFraction: 0.86)
+
+    @Namespace private var tabPillNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 首页 · 用户 · 账本 · 铭牌 · 我的
     private let items: [(icon: String, title: String)] = [
@@ -126,7 +165,8 @@ private struct PlatformFloatingTabBar: View {
             ForEach(0..<items.count, id: \.self) { index in
                 let selected = selectedTab == index
                 Button {
-                    withAnimation(.easeOut(duration: 0.18)) {
+                    guard selectedTab != index else { return }
+                    withAnimation(animation) {
                         selectedTab = index
                     }
                     HapticManager.selection.selectionChanged()
@@ -138,10 +178,13 @@ private struct PlatformFloatingTabBar: View {
                                 .foregroundStyle(.white)
                                 .frame(width: 24, height: 24)
                                 .background(PlatformStyle.accentPink, in: Circle())
+                                .scaleEffect(selected ? 1.06 : 1.0)
                         } else {
                             Image(systemName: items[index].icon)
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(selected ? PlatformStyle.accentPurple : PlatformStyle.textTertiary)
+                                .symbolEffect(.bounce, value: selected)
+                                .scaleEffect(selected ? 1.08 : 1.0)
                         }
                         Text(items[index].title)
                             .font(.system(size: 9, weight: selected ? .semibold : .medium))
@@ -153,15 +196,20 @@ private struct PlatformFloatingTabBar: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                    // Sliding selection pill (matched geometry = fluid hop between tabs)
                     .background {
                         if selected {
                             Capsule(style: .continuous)
                                 .fill(PlatformStyle.tabSelectedPill)
                                 .padding(.horizontal, 2)
+                                .matchedGeometryEffect(id: "platformTabSelectionPill", in: tabPillNamespace)
+                                .shadow(color: Color.black.opacity(0.04), radius: 4, y: 1)
                         }
                     }
                 }
                 .buttonStyle(.plain)
+                .animation(animation, value: selectedTab)
             }
         }
         .padding(.horizontal, 6)
@@ -603,6 +651,7 @@ private struct PlatformUsersView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .platformLightChrome()
         }
     }
 
@@ -1092,6 +1141,7 @@ private struct PlatformLedgersView: View {
             PlatformLedgerDetailSheet(ledgerId: ledger.id, ledgerName: ledger.name)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+                .platformLightChrome()
         }
     }
 

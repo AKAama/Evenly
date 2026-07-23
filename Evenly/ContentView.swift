@@ -220,21 +220,33 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, let userID = auth.user?.id {
-                ledgerStore.bind(userId: userID)
-                Task { await notifications.requestAuthorizationAndRegister() }
-                consumePendingJoinTokenIfNeeded()
+                if auth.isPlatformUser {
+                    ledgerStore.stop()
+                } else {
+                    ledgerStore.bind(userId: userID)
+                    Task { await notifications.requestAuthorizationAndRegister() }
+                    consumePendingJoinTokenIfNeeded()
+                }
             }
         }
         .onAppear {
             deepLinks.restorePersistedIfNeeded()
             if let userID = auth.user?.id {
                 selectedTab = 0
-                ledgerStore.bind(userId: userID)
-                Task { await notifications.requestAuthorizationAndRegister() }
+                if auth.isPlatformUser {
+                    ledgerStore.stop()
+                } else {
+                    ledgerStore.bind(userId: userID)
+                    Task { await notifications.requestAuthorizationAndRegister() }
+                }
             }
-            consumePendingJoinTokenIfNeeded()
+            if !auth.isPlatformUser {
+                consumePendingJoinTokenIfNeeded()
+            }
         }
-        .preferredColorScheme(themeManager.applyTheme())
+        // Platform ops shell is designed for a fixed light palette (SAVO-style).
+        // Forcing dark via ThemeManager made system labels white on our light cards.
+        .preferredColorScheme(auth.isPlatformUser ? .light : themeManager.applyTheme())
         .overlay(alignment: .bottom) {
             if let joinToast {
                 Text(joinToast)

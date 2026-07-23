@@ -505,7 +505,15 @@ private struct AccountDeactivationFlowView: View {
                 }
             }
 
-            if transferCount == 0 && archiveCount == 0 {
+            if preview == nil {
+                Section {
+                    Text(errorMessage ?? "无法加载注销预览，请关闭后重试。")
+                        .foregroundStyle(.secondary)
+                    Button("重试") {
+                        Task { await loadPreview() }
+                    }
+                }
+            } else if transferCount == 0 && archiveCount == 0 {
                 Section {
                     Text("你当前没有需要移交或归档的账本。")
                         .foregroundStyle(.secondary)
@@ -535,6 +543,7 @@ private struct AccountDeactivationFlowView: View {
     }
 
     private var canSubmit: Bool {
+        guard preview != nil else { return false }
         let archiveCount = preview?.ownedLedgersToArchive.count ?? 0
         if archiveCount > 0 && !acknowledgedArchive { return false }
         return true
@@ -575,6 +584,8 @@ private struct AccountDeactivationFlowView: View {
             }
             Section {
                 Button {
+                    // Tear down local session only after the user has seen the result table.
+                    auth.completeDeactivationSession()
                     dismiss()
                 } label: {
                     HStack {
@@ -604,19 +615,33 @@ private struct AccountDeactivationFlowView: View {
         } catch {
             await MainActor.run {
                 errorMessage = error.localizedDescription
+                // Stay on loading-failure friendly state: still allow retry via re-open.
+                // Do not jump to review with nil preview (would offer empty confirm).
                 phase = .review
+                preview = nil
             }
         }
     }
 
     private func confirmDeactivate() {
         guard canSubmit else { return }
+        // Preview failed to load — refuse to fire a blind deactivate.
+        guard preview != nil else {
+            errorMessage = "无法加载账本信息，请关闭后重试"
+            return
+        }
         isSubmitting = true
         errorMessage = nil
         var transfers: [DeactivateOwnerTransfer] = []
         for item in preview?.ownedLedgersRequiringTransfer ?? [] {
             let chosen = selectedOwners[item.ledgerId] ?? item.defaultSuccessor?.userId
-            transfers.append(DeactivateOwnerTransfer(ledgerId: item.ledgerId, newOwnerId: chosen))
+            let cleaned = chosen?.trimmingCharacters(in: .whitespacesAndNewlines)
+            transfers.append(
+                DeactivateOwnerTransfer(
+                    ledgerId: item.ledgerId,
+                    newOwnerId: (cleaned?.isEmpty == false) ? cleaned : nil
+                )
+            )
         }
         auth.deactivateAccount(ownerTransfers: transfers) { result in
             isSubmitting = false

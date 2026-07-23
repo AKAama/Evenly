@@ -655,6 +655,10 @@ class AuthManager: ObservableObject {
     }
 
     /// Soft-deactivate: transfer/archive owned ledgers, keep shared history.
+    ///
+    /// Does **not** clear the local session immediately — the result sheet must stay mounted
+    /// under `ContentView`'s `auth.user != nil` branch. Call `completeDeactivationSession()`
+    /// when the user dismisses the result screen.
     func deactivateAccount(
         ownerTransfers: [DeactivateOwnerTransfer],
         completion: @escaping (Result<DeactivateAccountResponse, Error>) -> Void
@@ -667,16 +671,23 @@ class AuthManager: ObservableObject {
         isLoading = true
         Task {
             do {
-                let body = DeactivateAccountRequest(ownerTransfers: ownerTransfers, confirm: true)
+                // Drop blank picker values so the server can fall back to default successors.
+                let cleaned = ownerTransfers.map { transfer in
+                    let owner = transfer.newOwnerId?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return DeactivateOwnerTransfer(
+                        ledgerId: transfer.ledgerId,
+                        newOwnerId: (owner?.isEmpty == false) ? owner : nil
+                    )
+                }
+                let body = DeactivateAccountRequest(ownerTransfers: cleaned, confirm: true)
                 let result: DeactivateAccountResponse = try await api.post(
                     APIEndpoints.deactivateAccount,
                     body: body
                 )
+                // Clear token so no further authenticated writes succeed, but keep `user`
+                // until the result UI is dismissed (otherwise ContentView tears down the flow).
                 await MainActor.run {
                     self.api.clearToken()
-                    self.user = nil
-                    self.userProfile = nil
-                    self.avatarImage = nil
                     self.isLoading = false
                     completion(.success(result))
                 }
@@ -689,11 +700,24 @@ class AuthManager: ObservableObject {
         }
     }
 
+    /// Finish local logout after the deactivation result screen is dismissed.
+    func completeDeactivationSession() {
+        api.clearToken()
+        user = nil
+        userProfile = nil
+        avatarImage = nil
+        isGuestMode = false
+        authMethods = []
+        hasPassword = true
+        isLoading = false
+    }
+
     /// Legacy entry: soft-deactivate with system defaults (no manual transfers).
     func deleteAccount(completion: @escaping (Error?) -> Void) {
         deactivateAccount(ownerTransfers: []) { result in
             switch result {
             case .success:
+                self.completeDeactivationSession()
                 completion(nil)
             case .failure(let error):
                 completion(error)

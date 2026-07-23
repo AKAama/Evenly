@@ -23,6 +23,18 @@ extension KeyedDecodingContainer {
         guard contains(key), try !decodeNil(forKey: key) else { return nil }
         return try decodeFlexibleDecimal(forKey: key)
     }
+
+    /// Accept UUID string or bare UUID from FastAPI/Pydantic.
+    func decodeFlexibleID(forKey key: Key) throws -> String {
+        if let s = try? decode(String.self, forKey: key) { return s }
+        if let u = try? decode(UUID.self, forKey: key) { return u.uuidString.lowercased() }
+        throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Expected string or UUID id")
+    }
+
+    func decodeFlexibleIDIfPresent(forKey key: Key) throws -> String? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        return try decodeFlexibleID(forKey: key)
+    }
 }
 
 // MARK: - Auth Models
@@ -236,6 +248,25 @@ struct AdminUserListItem: Codable, Identifiable {
         case expenseCreatedCount = "expense_created_count"
         case createdAt = "created_at"
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeFlexibleID(forKey: .id)
+        email = try c.decode(String.self, forKey: .email)
+        username = try c.decode(String.self, forKey: .username)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        publicDisplayName = try c.decodeIfPresent(String.self, forKey: .publicDisplayName)
+        avatarUrl = try c.decodeIfPresent(String.self, forKey: .avatarUrl)
+        accountKind = try c.decodeIfPresent(String.self, forKey: .accountKind)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        badge = try c.decodeIfPresent(String.self, forKey: .badge)
+        badgeLabel = try c.decodeIfPresent(String.self, forKey: .badgeLabel)
+        badgeColor = try c.decodeIfPresent(String.self, forKey: .badgeColor)
+        membershipCount = try c.decodeIfPresent(Int.self, forKey: .membershipCount)
+        ownedLedgerCount = try c.decodeIfPresent(Int.self, forKey: .ownedLedgerCount)
+        expenseCreatedCount = try c.decodeIfPresent(Int.self, forKey: .expenseCreatedCount)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+    }
 }
 
 struct AdminLedgerListResponse: Codable {
@@ -269,6 +300,30 @@ struct AdminLedgerListItem: Codable, Identifiable {
         case createdAt = "created_at"
         case isOrphan = "is_orphan"
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeFlexibleID(forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        ownerId = try c.decodeFlexibleIDIfPresent(forKey: .ownerId)
+        currency = try c.decodeIfPresent(String.self, forKey: .currency)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        ownerLabel = try c.decodeIfPresent(String.self, forKey: .ownerLabel)
+        ownerEmail = try c.decodeIfPresent(String.self, forKey: .ownerEmail)
+        memberCount = try c.decodeIfPresent(Int.self, forKey: .memberCount)
+        expenseCount = try c.decodeIfPresent(Int.self, forKey: .expenseCount)
+        if let d = try? c.decodeIfPresent(Double.self, forKey: .totalSpend) {
+            totalSpend = d
+        } else if let i = try? c.decodeIfPresent(Int.self, forKey: .totalSpend) {
+            totalSpend = Double(i)
+        } else if let s = try? c.decodeIfPresent(String.self, forKey: .totalSpend), let d = Double(s) {
+            totalSpend = d
+        } else {
+            totalSpend = nil
+        }
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        isOrphan = try c.decodeIfPresent(Bool.self, forKey: .isOrphan)
+    }
 }
 
 struct AdminBadgeItem: Codable, Identifiable {
@@ -286,6 +341,18 @@ struct AdminBadgeItem: Codable, Identifiable {
         case sortOrder = "sort_order"
         case isActive = "is_active"
         case userCount = "user_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeFlexibleID(forKey: .id)
+        key = try c.decode(String.self, forKey: .key)
+        label = try c.decode(String.self, forKey: .label)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder)
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive)
+        userCount = try c.decodeIfPresent(Int.self, forKey: .userCount)
     }
 }
 

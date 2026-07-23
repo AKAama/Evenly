@@ -506,21 +506,23 @@ private struct PlatformHomeView: View {
         return dayFmt.string(from: Date())
     }
 
+    @MainActor
     private func loadStats() async {
         isLoading = true
         let dayStr = shanghaiDayString()
 
         // Wave 1: parallel totals only (limit=1). Orphan uses dedicated filter (not 200-row scan).
+        // Optional Int: nil means request failed — keep previous value (never flash all zeros).
         async let userN = fetchUserTotal()
         async let activeN = fetchLedgerTotal(status: "active")
         async let archivedN = fetchLedgerTotal(status: "archived")
         async let orphanN = fetchLedgerTotal(status: "orphan")
 
         let (u, a, ar, o) = await (userN, activeN, archivedN, orphanN)
-        appUserTotal = u
-        activeLedgerTotal = a
-        archivedLedgerTotal = ar
-        orphanLedgerTotal = o
+        if let u { appUserTotal = u }
+        if let a { activeLedgerTotal = a }
+        if let ar { archivedLedgerTotal = ar }
+        if let o { orphanLedgerTotal = o }
         isLoading = false // paint stats ASAP
 
         // Wave 2: audit + badges in parallel
@@ -528,43 +530,59 @@ private struct PlatformHomeView: View {
         async let badgePack = fetchBadgeStats()
         let (audit, badges) = await (auditPack, badgePack)
 
-        todayAuditTotal = audit.total
-        todayTopActions = audit.top
-        auditEvents = audit.events
-        badgeCatalogCount = badges.catalog
-        unassignedBadgeUsers = badges.unassigned
+        if let t = audit.total { todayAuditTotal = t }
+        if let top = audit.top { todayTopActions = top }
+        if let events = audit.events { auditEvents = events }
+        if let catalog = badges.catalog { badgeCatalogCount = catalog }
+        if let unassigned = badges.unassigned { unassignedBadgeUsers = unassigned }
     }
 
-    // Helpers return Sendable Int/tuples so `async let` stays Swift-6 friendly
-    // (avoid `async let x: SomeDecodable = …`).
+    // Helpers return optional so a single failed call does not wipe the home dashboard.
 
-    private func fetchUserTotal() async -> Int {
-        let res: AdminUserListResponse? = try? await APIClient.shared.get(
-            APIEndpoints.adminUsers(accountKind: "app", limit: 1)
-        )
-        return res?.total ?? 0
+    private func fetchUserTotal() async -> Int? {
+        do {
+            let res: AdminUserListResponse = try await APIClient.shared.get(
+                APIEndpoints.adminUsers(accountKind: "app", limit: 1)
+            )
+            return res.total
+        } catch {
+            print("📡 Home user total failed: \(error)")
+            return nil
+        }
     }
 
-    private func fetchLedgerTotal(status: String) async -> Int {
-        let res: AdminLedgerListResponse? = try? await APIClient.shared.get(
-            APIEndpoints.adminLedgers(status: status, limit: 1)
-        )
-        return res?.total ?? 0
+    private func fetchLedgerTotal(status: String) async -> Int? {
+        do {
+            let res: AdminLedgerListResponse = try await APIClient.shared.get(
+                APIEndpoints.adminLedgers(status: status, limit: 1)
+            )
+            return res.total
+        } catch {
+            print("📡 Home ledger total(\(status)) failed: \(error)")
+            return nil
+        }
     }
 
-    private func fetchHomeAudit(day: String) async -> (total: Int, top: [(String, Int)], events: [AuditEventItem]) {
-        var total = 0
-        var top: [(String, Int)] = []
-        var events: [AuditEventItem] = []
+    private func fetchHomeAudit(day: String) async -> (
+        total: Int?,
+        top: [(String, Int)]?,
+        events: [AuditEventItem]?
+    ) {
+        var total: Int?
+        var top: [(String, Int)]?
+        var events: [AuditEventItem]?
 
-        if let sum: AuditSummaryResponse = try? await APIClient.shared.get(
-            APIEndpoints.adminAuditSummary(day: day)
-        ) {
+        do {
+            let sum: AuditSummaryResponse = try await APIClient.shared.get(
+                APIEndpoints.adminAuditSummary(day: day)
+            )
             total = sum.total ?? 0
             top = (sum.byAction ?? [])
                 .sorted { $0.count > $1.count }
                 .prefix(5)
                 .map { ($0.action, $0.count) }
+        } catch {
+            print("📡 Home audit summary failed: \(error)")
         }
 
         do {
@@ -572,20 +590,24 @@ private struct PlatformHomeView: View {
                 APIEndpoints.adminAuditEvents(day: day, limit: 15)
             )
             events = list.items
-            if total == 0 { total = list.total }
+            if total == nil { total = list.total }
         } catch {
             print("📡 Home audit list failed: \(error)")
         }
         return (total, top, events)
     }
 
-    private func fetchBadgeStats() async -> (catalog: Int, unassigned: Int) {
-        let b: AdminBadgeListResponse? = try? await APIClient.shared.get(APIEndpoints.adminBadges)
-        guard let b else { return (badgeCatalogCount, unassignedBadgeUsers) }
-        return (
-            b.items.filter { $0.isActive != false }.count,
-            b.unassignedCount ?? 0
-        )
+    private func fetchBadgeStats() async -> (catalog: Int?, unassigned: Int?) {
+        do {
+            let b: AdminBadgeListResponse = try await APIClient.shared.get(APIEndpoints.adminBadges)
+            return (
+                b.items.filter { $0.isActive != false }.count,
+                b.unassignedCount ?? 0
+            )
+        } catch {
+            print("📡 Home badge stats failed: \(error)")
+            return (nil, nil)
+        }
     }
 }
 

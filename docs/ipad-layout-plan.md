@@ -15,11 +15,12 @@
 
 ## 已实现（相对手机有体感差异）
 
-- `EvenlyDeviceLayout.swift` — `isPadIdiom`、列宽常量  
-- `IPadAppShell.swift` — `NavigationSplitView` 侧栏（账本列表 + 新建 + 设置）  
-- `IPadLedgerWorkspace.swift` — **宽屏双栏**：左账单列表 / 右概览+结算；窄宽（分屏）改纵向堆叠  
+- **严格两列**：`NavigationSplitView` = 侧栏 | 详情（**取消**详情内再分左右第三列）  
+- `IPadLedgerWorkspace` — **单画布**居中限宽：概览 → 筛选 → iPad 专用账单行 → 转账建议  
+- `IPadExpenseRow` / `IPadSettlementRow` — 更大字号、行高、状态文案，不用手机 `ExpenseUnifiedListRow` 硬拉宽  
+- 概览用系统 secondary 背景，不用蓝紫渐变营销卡  
 - `ContentView` — iPad 走 workspace，**iPhone 仍用原 `ledgerTabView`**  
-- `LoginView` — iPad 限宽 + 轻卡片，避免输入条拉满整屏
+- `LoginView` — iPad 限宽 + 轻卡片
 
 ## 后续迭代（按优先级）
 

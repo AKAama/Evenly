@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var isHandlingJoinLink = false
     @State private var shareSnapshot: LedgerShareSnapshot?
     @ObservedObject private var deepLinks = DeepLinkInbox.shared
+    /// iPad split shell only (phone TabView unchanged).
+    @State private var iPadSidebar: IPadSidebarItem = .ledgers
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
@@ -151,7 +153,16 @@ struct ContentView: View {
             if auth.user != nil {
                 if auth.isPlatformUser {
                     // Same login page; platform accounts get an ops shell instead of ledgers.
+                    // TODO(iPad): optional wide-layout ops shell; phone ops unchanged for now.
                     PlatformConsoleRootView()
+                } else if EvenlyDeviceLayout.isPadIdiom {
+                    // iPad: sidebar + detail. Phone keeps TabView below.
+                    IPadAppShell(selectedSidebar: $iPadSidebar) {
+                        ledgerTabView
+                    }
+                    .safeAreaInset(edge: .top) {
+                        invitationBanner
+                    }
                 } else {
                     TabView(selection: $selectedTab) {
                         ledgerTabView

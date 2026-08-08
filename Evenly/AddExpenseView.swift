@@ -62,6 +62,8 @@ struct AddExpenseView: View {
     let participants: [Person]
     let currentUserId: String?
     let ledgerId: UUID?
+    /// When true, start voice capture shortly after appear (new expenses only).
+    var startWithVoice: Bool = false
     var onSave: @MainActor (Expense) async -> Result<Void, Error>
     private let existingId: UUID?
     /// 已加入的注册成员（可作为付款人）
@@ -130,11 +132,13 @@ struct AddExpenseView: View {
         participants: [Person],
         currentUserId: String? = nil,
         ledgerId: UUID? = nil,
+        startWithVoice: Bool = false,
         onSave: @escaping @MainActor (Expense) async -> Result<Void, Error>
     ) {
         self.participants = participants
         self.currentUserId = currentUserId
         self.ledgerId = ledgerId
+        self.startWithVoice = startWithVoice && expense == nil
         self.onSave = onSave
         self.existingId = expense?.id
         _title = State(initialValue: expense?.title ?? "")
@@ -247,6 +251,12 @@ struct AddExpenseView: View {
                     selectedParticipantIds.insert(first.id)
                 }
                 cleanUnavailableSelections()
+                if startWithVoice, ledgerId != nil, !voiceSession.isRecording, !voiceSession.isProcessing {
+                    // Let the sheet finish presenting before mic permission / websocket.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        toggleVoiceRecording()
+                    }
+                }
             }
             .onDisappear {
                 voiceSession.cancel()

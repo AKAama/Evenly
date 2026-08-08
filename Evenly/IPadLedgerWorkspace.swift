@@ -29,6 +29,8 @@ struct IPadLedgerWorkspace: View {
 
     var onCycleFilter: () -> Void
     var onAddExpense: () -> Void
+    /// Opens add-expense flow and prefers voice capture when possible.
+    var onVoiceExpense: () -> Void = {}
     var onMembers: () -> Void
     var onShare: () -> Void
     var onOpenExpense: (Expense) -> Void
@@ -99,13 +101,24 @@ struct IPadLedgerWorkspace: View {
             }
             .accessibilityLabel("成员")
 
-            Button {
-                HapticManager.impact(.medium)
-                onAddExpense()
+            // Primary create: icon only — menu keeps secondary paths without wordy CTAs.
+            Menu {
+                Button {
+                    HapticManager.impact(.medium)
+                    onAddExpense()
+                } label: {
+                    Label("添加支出", systemImage: "yensign.circle")
+                }
+                Button {
+                    HapticManager.impact(.medium)
+                    onVoiceExpense()
+                } label: {
+                    Label("语音添加", systemImage: "mic.fill")
+                }
             } label: {
                 Image(systemName: "plus")
             }
-            .accessibilityLabel("记一笔")
+            .accessibilityLabel("添加")
         }
     }
 
@@ -146,17 +159,6 @@ struct IPadLedgerWorkspace: View {
                     metaLabel(systemImage: "checkmark.seal", text: "需确认")
                 }
                 Spacer(minLength: 0)
-                Button {
-                    HapticManager.impact(.medium)
-                    onAddExpense()
-                } label: {
-                    Text("记一笔")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
             }
         }
         .padding(20)
@@ -257,20 +259,20 @@ struct IPadLedgerWorkspace: View {
     }
 
     private var emptyExpenses: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 32, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("暂无账单")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Text("点右上角 + 或下方按钮记一笔")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-            Button("记一笔", action: onAddExpense)
-                .buttonStyle(.bordered)
-                .padding(.top, 4)
+        ContentUnavailableView {
+            Label("暂无支出", systemImage: "tray")
+        } description: {
+            Text("还没有记录。用右上角 + 添加，或从这里开始。")
+        } actions: {
+            Button {
+                HapticManager.impact(.medium)
+                onAddExpense()
+            } label: {
+                Label("添加支出", systemImage: "plus.circle.fill")
+            }
+            .buttonStyle(.borderedProminent)
         }
+        .padding(.vertical, 8)
     }
 
     // MARK: - Settlements

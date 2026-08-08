@@ -15,6 +15,7 @@ private enum LoginField: Hashable {
 
 struct LoginView: View {
     @EnvironmentObject var auth: AuthManager
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingRegister = false
     @State private var isShowingPasswordReset = false
     @FocusState private var focusedField: LoginField?
@@ -265,7 +266,7 @@ struct LoginView: View {
                 onRequest: auth.prepareAppleSignIn,
                 onCompletion: auth.handleAppleSignIn
             )
-            .signInWithAppleButtonStyle(.black)
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
             .frame(height: 48)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {

@@ -29,7 +29,6 @@ struct ContentView: View {
     @State private var actionError: String?
     @State private var showingLeaveLedgerAlert = false
     @State private var showingDeleteLedgerAlert = false
-    @State private var didLongPressLedgerMenu = false
     @State private var joinToast: String?
     @State private var isHandlingJoinLink = false
     @State private var shareSnapshot: LedgerShareSnapshot?
@@ -530,8 +529,8 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "line.3.horizontal")
                     }
-                    .onLongPressGesture(perform: openAddLedgerFromLedgerMenu)
                     .buttonStyle(.spring(.light))
+                    .accessibilityLabel("账本列表")
                 }
 
                 if let currentLedger = ledgerStore.currentLedger {
@@ -584,19 +583,8 @@ struct ContentView: View {
     }
 
     private func openLedgerDrawerFromMenuButton() {
-        if didLongPressLedgerMenu {
-            didLongPressLedgerMenu = false
-            return
-        }
-
         HapticManager.impact(.light)
         sheetType = .ledgerDrawer
-    }
-
-    private func openAddLedgerFromLedgerMenu() {
-        didLongPressLedgerMenu = true
-        HapticManager.impact(.medium)
-        sheetType = .addLedger
     }
 
     private func openExpenseDetail(_ expense: Expense, in ledger: Ledger) {

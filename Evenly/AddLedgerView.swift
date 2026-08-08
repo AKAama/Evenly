@@ -75,6 +75,7 @@ struct AddLedgerView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             Form {
                 Section {
                     HStack(spacing: 12) {
@@ -85,7 +86,10 @@ struct AddLedgerView: View {
                         TextField("输入账本名称", text: $title)
                             .textInputAutocapitalization(.sentences)
                             .focused($focusedField, equals: .title)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .participant }
                     }
+                    .id(Field.title)
                 } header: {
                     Text("账本名称")
                 }
@@ -155,11 +159,14 @@ struct AddLedgerView: View {
 	                        .textInputAutocapitalization(.never)
 	                        .autocorrectionDisabled()
 	                        .focused($focusedField, equals: .participant)
+	                        .submitLabel(.done)
+	                        .onSubmit { focusedField = nil }
 
                         if isSearching {
                             ProgressView()
                         }
                     }
+                    .id(Field.participant)
 
                     ForEach(searchResults) { user in
                         Button {
@@ -222,6 +229,14 @@ struct AddLedgerView: View {
             }
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: focusedField) { _, field in
+                guard let field else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(field, anchor: .center)
+                    }
+                }
+            }
             .task(id: participantInput) {
                 await searchParticipants()
             }
@@ -260,6 +275,7 @@ struct AddLedgerView: View {
                 Button("确定", role: .cancel) {}
             } message: {
                 Text(saveError ?? "未知错误")
+            }
             }
         }
     }

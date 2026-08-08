@@ -36,6 +36,7 @@ struct ContentView: View {
     @ObservedObject private var deepLinks = DeepLinkInbox.shared
     /// iPad split shell only (phone TabView unchanged).
     @State private var iPadSidebar: IPadSidebarItem = .ledgers
+    @State private var iPadShowAllSettlements = false
 
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
@@ -156,9 +157,15 @@ struct ContentView: View {
                     // TODO(iPad): optional wide-layout ops shell; phone ops unchanged for now.
                     PlatformConsoleRootView()
                 } else if EvenlyDeviceLayout.isPadIdiom {
-                    // iPad: sidebar + detail. Phone keeps TabView below.
-                    IPadAppShell(selectedSidebar: $iPadSidebar) {
-                        ledgerTabView
+                    // iPad-only wide shell. Phone TabView path below is unchanged.
+                    IPadAppShell(
+                        selectedSidebar: $iPadSidebar,
+                        onAddLedger: {
+                            HapticManager.impact(.medium)
+                            sheetType = .addLedger
+                        }
+                    ) {
+                        iPadDetailRoot
                     }
                     .safeAreaInset(edge: .top) {
                         invitationBanner
@@ -515,6 +522,124 @@ struct ContentView: View {
         }
         expenseToDelete = nil
         expenseDeleteLedgerId = nil
+    }
+
+    /// iPad detail column: wide workspace when a ledger is selected.
+    @ViewBuilder
+    private var iPadDetailRoot: some View {
+        NavigationStack {
+            Group {
+                if ledgerStore.ledgers.isEmpty {
+                    emptyStateView
+                } else if let ledger = ledgerStore.currentLedger {
+                    IPadLedgerWorkspace(
+                        ledger: ledger,
+                        expenses: filteredExpenses(for: ledger),
+                        settlements: mySettlements(in: ledger),
+                        isLoadingSettlements: isLoadingSettlementData,
+                        settlementError: settlementError,
+                        expenseFilterLabel: expenseFilter.rawValue,
+                        respondingExpenseIds: respondingExpenseIds,
+                        onCycleFilter: {
+                            expenseFilter = expenseFilter.next
+                        },
+                        onAddExpense: {
+                            sheetType = .addExpense
+                        },
+                        onMembers: {
+                            sheetType = .members(ledger)
+                        },
+                        onShare: {
+                            presentLedgerShare(for: ledger)
+                        },
+                        onOpenExpense: { expense in
+                            openExpenseDetail(expense, in: ledger)
+                        },
+                        onConfirmExpense: { expense in
+                            respond(to: expense, with: .confirmed, in: ledger)
+                        },
+                        onRejectExpense: { expense in
+                            respond(to: expense, with: .rejected, in: ledger)
+                        },
+                        onEditExpense: { expense in
+                            openEditExpense(expense, in: ledger)
+                        },
+                        onDeleteExpense: { expense in
+                            prepareToDeleteExpense(expense, in: ledger)
+                        },
+                        onOpenAllSettlements: {
+                            iPadShowAllSettlements = true
+                        },
+                        canRespond: { expense in
+                            canRespond(to: expense, in: ledger)
+                        },
+                        canEdit: { expense in
+                            canEditExpense(expense, in: ledger)
+                        },
+                        formatAmount: formatAmount
+                    )
+                    .navigationDestination(isPresented: $iPadShowAllSettlements) {
+                        SettlementDetailView(
+                            ledger: ledger,
+                            suggestions: settlementSuggestions
+                        )
+                    }
+                    .onAppear {
+                        if loadedSettlementLedgerId != ledger.id {
+                            loadedSettlementLedgerId = ledger.id
+                            loadSettlementData(for: ledger)
+                        } else if settlementSuggestions.isEmpty {
+                            loadSettlementData(for: ledger)
+                        }
+                    }
+                    .onChange(of: ledger.id) { _, _ in
+                        loadedSettlementLedgerId = ledger.id
+                        settlementSuggestions = []
+                        loadSettlementData(for: ledger)
+                    }
+                    .toolbar {
+                        if let userId = auth.user?.id, ledger.ownerId != userId {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button(role: .destructive) {
+                                    HapticManager.notificationOccurred(.warning)
+                                    showingLeaveLedgerAlert = true
+                                } label: {
+                                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                                }
+                                .accessibilityLabel("退出账本")
+                            }
+                        } else if ledger.ownerId == auth.user?.id {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button(role: .destructive) {
+                                    HapticManager.notificationOccurred(.warning)
+                                    showingDeleteLedgerAlert = true
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .accessibilityLabel("删除账本")
+                            }
+                        }
+                    }
+                } else {
+                    ContentUnavailableView {
+                        Label("选择一本账本", systemImage: "books.vertical")
+                    } description: {
+                        Text("从左侧列表打开账本，或点 + 新建。")
+                    } actions: {
+                        Button("新建账本") {
+                            sheetType = .addLedger
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+            .searchable(
+                text: $searchText,
+                prompt: ledgerStore.currentLedger == nil ? "搜索账本" : "搜索账单"
+            )
+        }
+        .environmentObject(auth)
+        .environmentObject(ledgerStore)
     }
 
     @ViewBuilder

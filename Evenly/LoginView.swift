@@ -59,7 +59,7 @@ struct LoginView: View {
                 .allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                Spacer(minLength: 28)
+                Spacer(minLength: EvenlyDeviceLayout.isPadIdiom ? 48 : 28)
 
                 // 1) Brand — calm, not competing with actions
                 brandHeader
@@ -81,8 +81,17 @@ struct LoginView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 28)
             }
-            .frame(maxWidth: 440)
+            .frame(maxWidth: EvenlyDeviceLayout.formMaxWidth)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // iPad: soft card so the form doesn't float raw on a huge canvas.
+            .padding(.vertical, EvenlyDeviceLayout.isPadIdiom ? 24 : 0)
+            .background {
+                if EvenlyDeviceLayout.isPadIdiom {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(Color(.systemBackground).opacity(colorScheme == .dark ? 0.55 : 0.72))
+                        .padding(.horizontal, 8)
+                }
+            }
         }
         .ignoresSafeArea(.keyboard)
         .navigationBarHidden(true)

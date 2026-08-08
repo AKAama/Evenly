@@ -13,11 +13,13 @@
 | 平台运营号 | 暂仍用 `PlatformConsoleRootView`（可二期再做宽屏） |
 | 游客模式 | 暂仍用 `GuestModeView`（可二期加宽屏画布） |
 
-## 已落骨架
+## 已实现（相对手机有体感差异）
 
 - `EvenlyDeviceLayout.swift` — `isPadIdiom`、列宽常量  
-- `IPadAppShell.swift` — split + 侧栏选账本 → `LedgerStore.setCurrentLedger`  
-- `ContentView` — 仅在 pad idiom 切换到 `IPadAppShell`
+- `IPadAppShell.swift` — `NavigationSplitView` 侧栏（账本列表 + 新建 + 设置）  
+- `IPadLedgerWorkspace.swift` — **宽屏双栏**：左账单列表 / 右概览+结算；窄宽（分屏）改纵向堆叠  
+- `ContentView` — iPad 走 workspace，**iPhone 仍用原 `ledgerTabView`**  
+- `LoginView` — iPad 限宽 + 轻卡片，避免输入条拉满整屏
 
 ## 后续迭代（按优先级）
 

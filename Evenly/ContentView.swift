@@ -37,9 +37,6 @@ struct ContentView: View {
     /// iPad split shell only (phone TabView unchanged).
     @State private var iPadSidebar: IPadSidebarItem = .ledgers
     @State private var iPadShowAllSettlements = false
-    /// When opening add-expense from iPad +, optionally auto-start voice.
-    @State private var addExpensePreferVoice = false
-
     private enum ExpenseFilter: String, CaseIterable, Identifiable {
         case involvingMe = "有我参与"
         case createdByMe = "我创建的"
@@ -448,14 +445,10 @@ struct ContentView: View {
                 participants: ledger.participants,
                 currentUserId: auth.user?.id,
                 ledgerId: ledger.id,
-                startWithVoice: addExpensePreferVoice,
                 onSave: { newExpense in
                     await submitAddExpense(newExpense, to: ledger)
                 }
             )
-            .onDisappear {
-                addExpensePreferVoice = false
-            }
         }
     }
 
@@ -550,11 +543,6 @@ struct ContentView: View {
                             expenseFilter = expenseFilter.next
                         },
                         onAddExpense: {
-                            addExpensePreferVoice = false
-                            sheetType = .addExpense
-                        },
-                        onVoiceExpense: {
-                            addExpensePreferVoice = true
                             sheetType = .addExpense
                         },
                         onMembers: {

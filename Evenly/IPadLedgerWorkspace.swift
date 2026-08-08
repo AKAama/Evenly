@@ -29,8 +29,6 @@ struct IPadLedgerWorkspace: View {
 
     var onCycleFilter: () -> Void
     var onAddExpense: () -> Void
-    /// Opens add-expense flow and prefers voice capture when possible.
-    var onVoiceExpense: () -> Void = {}
     var onMembers: () -> Void
     var onShare: () -> Void
     var onOpenExpense: (Expense) -> Void
@@ -84,7 +82,7 @@ struct IPadLedgerWorkspace: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
+        ToolbarItem(placement: .topBarTrailing) {
             Button {
                 HapticManager.impact(.light)
                 onShare()
@@ -92,7 +90,8 @@ struct IPadLedgerWorkspace: View {
                 Image(systemName: "square.and.arrow.up")
             }
             .accessibilityLabel("分享")
-
+        }
+        ToolbarItem(placement: .topBarTrailing) {
             Button {
                 HapticManager.impact(.light)
                 onMembers()
@@ -100,25 +99,20 @@ struct IPadLedgerWorkspace: View {
                 Image(systemName: "person.2")
             }
             .accessibilityLabel("成员")
-
-            // Primary create: icon only — menu keeps secondary paths without wordy CTAs.
-            Menu {
-                Button {
-                    HapticManager.impact(.medium)
-                    onAddExpense()
-                } label: {
-                    Label("添加支出", systemImage: "yensign.circle")
-                }
-                Button {
-                    HapticManager.impact(.medium)
-                    onVoiceExpense()
-                } label: {
-                    Label("语音添加", systemImage: "mic.fill")
-                }
+        }
+        // Single, obvious primary — one sheet; voice lives inside AddExpenseView (mic).
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                HapticManager.impact(.medium)
+                onAddExpense()
             } label: {
-                Image(systemName: "plus")
+                Image(systemName: "plus.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.title2)
+                    .foregroundStyle(EvenlyStyle.brandBlue)
             }
-            .accessibilityLabel("添加")
+            .accessibilityLabel("添加支出")
+            .accessibilityHint("打开记账页，也可在页内使用语音")
         }
     }
 

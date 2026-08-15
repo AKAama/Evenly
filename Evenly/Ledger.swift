@@ -210,9 +210,13 @@ struct Ledger: Identifiable, Codable {
         members?.first { $0.userId == userId }
     }
 
-    /// Get person by userId
-    func person(by userId: String) -> Person? {
-        participants.first { $0.userId == userId }
+    /// Get a person by the settlement identity returned by the backend.
+    /// Registered members use userId; temporary members use their member id.
+    func person(by settlementId: String) -> Person? {
+        let memberId = UUID(uuidString: settlementId)
+        return participants.first {
+            $0.userId == settlementId || (memberId != nil && $0.id == memberId)
+        }
     }
 
     func registeredUserId(for person: Person) -> String? {

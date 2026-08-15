@@ -160,7 +160,6 @@ struct ContentView: View {
                     IPadAppShell(
                         selectedSidebar: $iPadSidebar,
                         onAddLedger: {
-                            HapticManager.impact(.medium)
                             sheetType = .addLedger
                         }
                     ) {
@@ -202,6 +201,7 @@ struct ContentView: View {
             if let userID {
                 // Always land on the ledger tab after login / session restore.
                 selectedTab = 0
+                iPadSidebar = .ledgers
                 if auth.isPlatformUser {
                     // Ops accounts do not participate in ledgers / guest data.
                     ledgerStore.stop()
@@ -250,6 +250,7 @@ struct ContentView: View {
             deepLinks.restorePersistedIfNeeded()
             if let userID = auth.user?.id {
                 selectedTab = 0
+                iPadSidebar = .ledgers
                 if auth.isPlatformUser {
                     ledgerStore.stop()
                 } else {
@@ -313,6 +314,7 @@ struct ContentView: View {
         guard !isHandlingJoinLink else { return }
         isHandlingJoinLink = true
         selectedTab = 0
+        iPadSidebar = .ledgers
         do {
             let result = try await ledgerStore.joinViaInviteToken(token)
             deepLinks.clearPendingJoinToken()
@@ -368,12 +370,14 @@ struct ContentView: View {
             if let ledger = ledgerStore.ledgers.first(where: { $0.id == ledgerID }) {
                 ledgerStore.currentLedger = ledger
                 selectedTab = 0
+                iPadSidebar = .ledgers
                 notifications.consumeDestination()
             } else {
                 ledgerStore.fetchLedgers()
             }
         case .invitations:
             selectedTab = 0
+            iPadSidebar = .ledgers
             ledgerStore.refreshInvitations()
             ledgerStore.fetchLedgers()
             notifications.consumeDestination()

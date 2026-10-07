@@ -8,6 +8,8 @@
 import Foundation
 
 enum APIEndpoints {
+    static let iosUpdate = "/app/ios-update"
+
     // MARK: - Auth
     static let login = "/auth/login"
     static let appleLogin = "/auth/apple"
@@ -137,6 +139,12 @@ enum APIEndpoints {
     // MARK: - Expenses
     static func expenses(ledgerId: String) -> String {
         "/expenses/ledgers/\(ledgerId)/expenses"
+    }
+    static func receiptDownloadURL(expenseId: UUID, receiptURL: String) -> String {
+        var components = URLComponents()
+        components.path = "/expenses/\(expenseId.uuidString)/receipts/download-url"
+        components.queryItems = [URLQueryItem(name: "receipt_url", value: receiptURL)]
+        return components.string ?? components.path
     }
     static func voiceExpenseDraft(ledgerId: String) -> String {
         "/expenses/ledgers/\(ledgerId)/voice-draft"

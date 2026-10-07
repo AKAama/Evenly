@@ -440,9 +440,12 @@ struct GuestModeView: View {
                 Text(currency(total))
                     .font(.system(size: 27, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .allowsTightening(true)
             }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             HStack(spacing: 10) {
                 Button {
@@ -453,6 +456,7 @@ struct GuestModeView: View {
                 .buttonStyle(.plain)
                 guestMetric("\(ledger.expenses.count)", label: "账单", icon: "receipt.fill")
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

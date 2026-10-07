@@ -13,11 +13,13 @@ struct AddLedgerView: View {
     @State private var searchResults: [UserResponse] = []
     @State private var isSearching = false
     @State private var completedSearchQuery = ""
+    @State private var createdLedgerPendingCover: Ledger?
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var showSaveError = false
     /// Default on for multi-person trust; owner can turn off anytime.
     @State private var requireConfirmation = true
+    @State private var pendingCoverSelection: LedgerCoverSelection?
     @State private var coverImage: UIImage?
     @State private var coverPickerItem: PhotosPickerItem?
     @State private var isPickingCover = false
@@ -97,7 +99,7 @@ struct AddLedgerView: View {
                 Section {
                     HStack(alignment: .center, spacing: 16) {
                         coverPreview
-                            .frame(width: 72, height: 106)
+                            .frame(width: 72, height: 108)
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
 
@@ -244,6 +246,12 @@ struct AddLedgerView: View {
                 guard let item else { return }
                 Task { await loadCover(from: item) }
             }
+            .sheet(item: $pendingCoverSelection) { selection in
+                LedgerCoverEditorView(image: selection.image) { edited in
+                    coverImage = edited
+                    HapticManager.selectionChanged()
+                }
+            }
             .navigationTitle(existingLedger == nil ? "新建账本" : "编辑账本")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -271,8 +279,19 @@ struct AddLedgerView: View {
                     }
                 }
             }
-            .alert("保存失败", isPresented: $showSaveError) {
-                Button("确定", role: .cancel) {}
+            .alert(createdLedgerPendingCover == nil ? "保存失败" : "封面上传失败", isPresented: $showSaveError) {
+                if let created = createdLedgerPendingCover {
+                    Button("重试") {
+                        isSaving = true
+                        uploadCoverIfNeeded(for: created)
+                    }
+                    Button("稍后设置", role: .cancel) {
+                        onSave?(created)
+                        dismiss()
+                    }
+                } else {
+                    Button("确定", role: .cancel) {}
+                }
             } message: {
                 Text(saveError ?? "未知错误")
             }
@@ -432,6 +451,10 @@ struct AddLedgerView: View {
         HapticManager.notificationOccurred(.success)
 
         isSaving = true
+        if let created = createdLedgerPendingCover {
+            uploadCoverIfNeeded(for: created)
+            return
+        }
 
         let persons = participants.map(\.person)
 
@@ -462,6 +485,7 @@ struct AddLedgerView: View {
                         HapticManager.notificationOccurred(.error)
                     }
                 case .success(let createdLedger):
+                    self.createdLedgerPendingCover = createdLedger
                     self.uploadCoverIfNeeded(for: createdLedger)
                 }
             }
@@ -501,11 +525,18 @@ struct AddLedgerView: View {
     @MainActor
     private func loadCover(from item: PhotosPickerItem) async {
         isPickingCover = true
-        defer { isPickingCover = false }
+        defer {
+            isPickingCover = false
+            coverPickerItem = nil
+        }
         do {
             guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else { return }
-            coverImage = image
+                  let image = UIImage(data: data) else {
+                saveError = "无法读取封面图片"
+                showSaveError = true
+                return
+            }
+            pendingCoverSelection = LedgerCoverSelection(image: image)
             HapticManager.impact(.light)
         } catch {
             saveError = "无法读取封面图片"
@@ -513,16 +544,21 @@ struct AddLedgerView: View {
         }
     }
 
-    /// After create succeeds, push cover bytes if user picked one; always dismiss.
+    /// Retry cover uploads against the same created ledger; never hide failures.
     private func uploadCoverIfNeeded(for created: Ledger) {
-        guard let coverImage,
-              let jpeg = LedgerCoverImagePrep.jpegData(from: coverImage) else {
+        guard let coverImage else {
             DispatchQueue.main.async {
                 self.isSaving = false
                 self.onSave?(created)
                 HapticManager.notificationOccurred(.success)
                 self.dismiss()
             }
+            return
+        }
+        guard let jpeg = LedgerCoverImagePrep.jpegData(from: coverImage) else {
+            isSaving = false
+            saveError = "账本已创建，但封面图片无法处理。可稍后在账本列表长按设置封面。"
+            showSaveError = true
             return
         }
         ledgerStore.uploadLedgerCover(created, imageData: jpeg) { result in
@@ -532,12 +568,12 @@ struct AddLedgerView: View {
                 case .success(let withCover):
                     self.onSave?(withCover)
                     HapticManager.notificationOccurred(.success)
-                case .failure:
-                    // Ledger exists; cover is optional — still open it. User can long-press on shelf to retry.
-                    self.onSave?(created)
-                    HapticManager.notificationOccurred(.warning)
+                    self.dismiss()
+                case .failure(let error):
+                    self.saveError = "账本已创建，但封面上传失败：\(error.localizedDescription)"
+                    self.showSaveError = true
+                    HapticManager.notificationOccurred(.error)
                 }
-                self.dismiss()
             }
         }
     }

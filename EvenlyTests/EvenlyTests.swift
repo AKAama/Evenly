@@ -74,12 +74,6 @@ final class EvenlyTests: XCTestCase {
         XCTAssertFalse(source.contains("RemoteAvatarView("))
     }
 
-    func testLedgerMenuButtonSupportsLongPressAddLedgerShortcut() throws {
-        let source = try sourceFile(named: "ContentView.swift")
-
-        XCTAssertTrue(source.contains(".onLongPressGesture(perform: openAddLedgerFromLedgerMenu)"))
-    }
-
     func testExpenseRowsExposeContextMenuActions() throws {
         let source = try sourceFile(named: "ContentView.swift")
 

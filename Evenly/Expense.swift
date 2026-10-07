@@ -24,8 +24,17 @@ struct Expense: Identifiable, Codable {
     var createdAt: Date?
     var updatedAt: Date?
     let createdBy: String?
+    var receiptURLs: [String]?
+    /// Unsaved local images are submitted as multipart files, never as receipt URLs.
+    var receiptUploadData: [Data]? = nil
     /// 成员确认状态: userId -> ConfirmationStatus
     var confirmations: [String: ConfirmationStatus]
+
+    // Cache only saved receipt URLs; local image bytes belong to the editing form.
+    enum CodingKeys: String, CodingKey {
+        case id, title, amount, refundAmount, payer, participants, status, note, category, icon
+        case expenseDate, createdAt, updatedAt, createdBy, receiptURLs, confirmations
+    }
 
     /// Effective spend after refunds — used for totals and settlement display.
     var netAmount: Decimal { max(amount - refundAmount, 0) }
@@ -47,7 +56,8 @@ struct Expense: Identifiable, Codable {
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
         createdBy: String? = nil,
-        confirmations: [String: ConfirmationStatus] = [:]
+        confirmations: [String: ConfirmationStatus] = [:],
+        receiptURLs: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -64,6 +74,7 @@ struct Expense: Identifiable, Codable {
         self.updatedAt = updatedAt
         self.createdBy = createdBy
         self.confirmations = confirmations
+        self.receiptURLs = receiptURLs
     }
 
     // Create from ExpenseWithDetails
@@ -86,6 +97,7 @@ struct Expense: Identifiable, Codable {
                 || person.userId.map(splitUserIds.contains) == true
         }
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
+        self.receiptURLs = response.receiptURLs ?? []
         self.note = response.note
         self.category = response.category
         self.icon = response.iconType.flatMap(ExpenseIconType.init(rawValue:)).flatMap { type in
@@ -113,6 +125,7 @@ struct Expense: Identifiable, Codable {
         self.payer = participants.first { $0.userId == response.payerId } ?? Person(name: "Unknown", userId: response.payerId)
         self.participants = participants
         self.status = ExpenseStatus(rawValue: response.status) ?? .pending
+        self.receiptURLs = response.receiptURLs ?? []
         self.note = response.note
         self.category = response.category
         self.icon = response.iconType.flatMap(ExpenseIconType.init(rawValue:)).flatMap { type in
@@ -174,7 +187,8 @@ extension Expense {
             expenseDate: Self.requestDateFormatter.string(from: expenseDate ?? Date()),
             category: category,
             iconType: icon?.type.rawValue,
-            iconValue: icon?.value
+            iconValue: icon?.value,
+            receiptURLs: receiptURLs ?? []
         )
     }
 

@@ -926,6 +926,7 @@ struct ExpenseCreate: Encodable {
     let category: String?
     let iconType: String?
     let iconValue: String?
+    var receiptURLs: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -937,6 +938,7 @@ struct ExpenseCreate: Encodable {
         case category
         case iconType = "icon_type"
         case iconValue = "icon_value"
+        case receiptURLs = "receipt_urls"
     }
 }
 
@@ -968,6 +970,7 @@ struct ExpenseResponse: Decodable, Identifiable {
     let category: String?
     let iconType: String?
     let iconValue: String?
+    let receiptURLs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -985,6 +988,7 @@ struct ExpenseResponse: Decodable, Identifiable {
         case category
         case iconType = "icon_type"
         case iconValue = "icon_value"
+        case receiptURLs = "receipt_urls"
     }
 
     init(from decoder: Decoder) throws {
@@ -1004,7 +1008,12 @@ struct ExpenseResponse: Decodable, Identifiable {
         category = try container.decodeIfPresent(String.self, forKey: .category)
         iconType = try container.decodeIfPresent(String.self, forKey: .iconType)
         iconValue = try container.decodeIfPresent(String.self, forKey: .iconValue)
+        receiptURLs = try container.decodeIfPresent([String].self, forKey: .receiptURLs)
     }
+}
+
+struct ReceiptDownloadURLResponse: Decodable {
+    let url: String
 }
 
 struct ExpenseRefundRequest: Encodable {
@@ -1033,6 +1042,7 @@ struct ExpenseWithDetails: Decodable, Identifiable {
     let category: String?
     let iconType: String?
     let iconValue: String?
+    let receiptURLs: [String]?
     let payer: UserResponse
     let splits: [ExpenseSplitResponse]
     let confirmations: [ExpenseConfirmationResponse]
@@ -1053,6 +1063,7 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         case category
         case iconType = "icon_type"
         case iconValue = "icon_value"
+        case receiptURLs = "receipt_urls"
         case payer
         case splits
         case confirmations
@@ -1075,6 +1086,7 @@ struct ExpenseWithDetails: Decodable, Identifiable {
         category = try container.decodeIfPresent(String.self, forKey: .category)
         iconType = try container.decodeIfPresent(String.self, forKey: .iconType)
         iconValue = try container.decodeIfPresent(String.self, forKey: .iconValue)
+        receiptURLs = try container.decodeIfPresent([String].self, forKey: .receiptURLs)
         payer = try container.decode(UserResponse.self, forKey: .payer)
         splits = try container.decode([ExpenseSplitResponse].self, forKey: .splits)
         confirmations = try container.decode([ExpenseConfirmationResponse].self, forKey: .confirmations)

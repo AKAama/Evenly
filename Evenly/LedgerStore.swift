@@ -789,7 +789,8 @@ final class LedgerStore: ObservableObject {
         Task {
             do {
                 let request = expense.toCreateRequest(payerId: payerId, ledgerId: ledger.id)
-                let response: ExpenseResponse = try await api.post(APIEndpoints.expenses(ledgerId: ledger.id.uuidString), body: request)
+                let response = try await saveExpenseRequest(request, expense: expense,
+                    endpoint: APIEndpoints.expenses(ledgerId: ledger.id.uuidString), method: .post)
 
                 var newExpense = Expense(from: response, participants: expense.participants)
                 // Prefer server values; keep local category/icon if an older API omits them.
@@ -815,6 +816,23 @@ final class LedgerStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func saveExpenseRequest(_ request: ExpenseCreate, expense: Expense,
+                                    endpoint: String, method: HTTPMethod) async throws -> ExpenseResponse {
+        let images = expense.receiptUploadData ?? []
+        guard !images.isEmpty else {
+            return try await api.request(endpoint: endpoint, method: method, body: request)
+        }
+        let encoded = try JSONEncoder().encode(request)
+        guard let payload = String(data: encoded, encoding: .utf8) else { throw APIError.invalidResponse }
+        return try await api.requestWithFormData(
+            endpoint: endpoint + "/with-receipts", method: method,
+            formFields: ["payload": payload],
+            files: images.enumerated().map { index, data in
+                FileUpload(fieldName: "files", filename: "receipt-\(index + 1).jpg", mimeType: "image/jpeg", data: data)
+            }
+        )
     }
 
     /// Record a partial refund against an expense (creator or payer).
@@ -864,10 +882,8 @@ final class LedgerStore: ObservableObject {
         Task {
             do {
                 let request = expense.toUpdateRequest(payerId: payerId)
-                let response: ExpenseResponse = try await api.put(
-                    APIEndpoints.updateExpense(expenseId: expense.id.uuidString),
-                    body: request
-                )
+                let response = try await saveExpenseRequest(request, expense: expense,
+                    endpoint: APIEndpoints.updateExpense(expenseId: expense.id.uuidString), method: .put)
                 // Prefer participants from the edit form; hydrate status/confirmations from server.
                 var updated = Expense(from: response, participants: expense.participants)
                 if updated.icon == nil { updated.icon = expense.icon }
@@ -934,7 +950,7 @@ final class LedgerStore: ObservableObject {
         }
     }
 
-    func respondToExpense(_ expense: Expense, status: ConfirmationStatus, in ledger: Ledger, completion: @escaping (Result<Void, Error>) -> Void) {
+    func respondToExpense(_ expense: Expense, status: ConfirmationStatus, in ledger: Ledger, completion: @escaping (Result<Expense, Error>) -> Void) {
         guard status == .confirmed || status == .rejected else {
             completion(.failure(NSError(domain: "LedgerStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "无效的确认状态"])))
             return
@@ -949,6 +965,11 @@ final class LedgerStore: ObservableObject {
                 )
 
                 await MainActor.run {
+                    var updatedExpense = expense
+                    updatedExpense.status = ExpenseStatus(rawValue: response.status) ?? expense.status
+                    if let userId = self.userId {
+                        updatedExpense.confirmations[userId] = status
+                    }
                     if var updatedLedger = self.ledgers.first(where: { $0.id == ledger.id }),
                        let expenseIndex = updatedLedger.expenses.firstIndex(where: { $0.id == expense.id }) {
                         updatedLedger.expenses[expenseIndex].status = ExpenseStatus(rawValue: response.status) ?? updatedLedger.expenses[expenseIndex].status
@@ -956,6 +977,7 @@ final class LedgerStore: ObservableObject {
                             updatedLedger.expenses[expenseIndex].confirmations[userId] = status
                         }
 
+                        updatedExpense = updatedLedger.expenses[expenseIndex]
                         if let ledgerIndex = self.ledgers.firstIndex(where: { $0.id == ledger.id }) {
                             self.ledgers[ledgerIndex] = updatedLedger
                         }
@@ -963,7 +985,7 @@ final class LedgerStore: ObservableObject {
                             self.currentLedger = updatedLedger
                         }
                     }
-                    completion(.success(()))
+                    completion(.success(updatedExpense))
                 }
             } catch {
                 await MainActor.run {

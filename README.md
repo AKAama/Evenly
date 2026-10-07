@@ -236,3 +236,15 @@ Alex、Sylvia、Stella、Tristen 一起旅行。Alex 垫付午饭 300 元，四�
 - 数据导出目前为纯文本，不是结构化 CSV/JSON。
 - 设置页的隐私政策和服务条款仍指向占位 URL。
 - Asset Catalog 缺少 `AccentColor`，构建会有资源警告但不阻塞运行。
+
+## 更新日志维护
+
+设置中的更新日志从 `Evenly/changelog.json` 读取，随 App 打包，可离线查看。
+
+- 新记录添加在数组最前面，按时间从新到旧排列。
+- `id` 必须唯一；`version` 填该次发布对应的 App 版本号，例如 `1.0.1`。
+- `date` 为展示日期，`title` 为更新标题，`items` 为面向用户的更新内容数组。
+- 历史记录无法确认发布版本时，`version` 保留为 `null`，页面仅展示日期。
+- 发布前核对最新日志的 `version` 与 App 的 `MARKETING_VERSION`；修改 JSON 不会自动更改 App 版本。
+- 更新提醒也使用此文件：在后端项目执行 `python scripts/sync_ios_changelog.py ../Evenly/Evenly/changelog.json`，将生成的 `app/resources/ios-changelog.json` 随后端部署。弹窗按后端配置的已发布版本展示标题和前 3 条内容。
+- 后端 `ios_update_message` 仅作为找不到日志时的备用文案；App Store 的“此版本的新内容”仍需在 App Store Connect 填写。

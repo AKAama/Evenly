@@ -274,9 +274,15 @@ struct IPadLedgerWorkspace: View {
     private var settlementsBlock: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("转账建议")
-                    .font(.title3.weight(.semibold))
-                Spacer()
+                SettlementNetBalanceHeader(
+                    title: "转账建议",
+                    settlements: settlements,
+                    userId: auth.user?.id,
+                    isLoading: isLoadingSettlements,
+                    hasError: settlementError != nil,
+                    formatAmount: formatAmount
+                )
+                .font(.title3.weight(.semibold))
                 if isLoadingSettlements {
                     ProgressView().controlSize(.small)
                 }

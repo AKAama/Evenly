@@ -1,78 +1,27 @@
 import SwiftUI
 
-struct ChangelogEntry: Identifiable {
+struct ChangelogEntry: Decodable, Identifiable {
     let id: String
+    let version: String?
     let date: String
     let title: String
     let items: [String]
 
-    static let all: [ChangelogEntry] = [
-        ChangelogEntry(
-            id: "2026.07.17",
-            date: "2026 年 7 月 17 日",
-            title: "通过 Apple 登录体验优化",
-            items: [
-                "使用 Apple 登录后直接进入账本，不再强制填写用户名、姓名或邮箱。",
-                "显示名称与用户名可在「设置 → 账户」中随时修改。",
-            ]
-        ),
-        ChangelogEntry(
-            id: "2026.07.16",
-            date: "2026 年 7 月 16 日",
-            title: "分享、确认与转账预估",
-            items: [
-                "支持把账本小结分享为图片，可自选支出、账单数、成员、转账流向与账单明细。",
-                "账单明细同时展示付款人与参与人；含未确认账单的转账用灰色「未确认」标记。",
-                "账本可开关「需要成员确认」：关闭后记账即计入结算，开启则仍需参与人确认。",
-                "转账流向按全部有效账单预估终局，确认完成后金额与方向保持一致。",
-            ]
-        ),
-        ChangelogEntry(
-            id: "2026.07.08",
-            date: "2026 年 7 月 8 日",
-            title: "记账与结算体验更新",
-            items: [
-                "重新设计新建账单，新增餐饮、交通、住宿等快捷分类与明细选项。",
-                "优化付款人与参与人选择，通过头像和清晰状态快速完成多人账单设置。",
-                "统一账本与弹出页面的视觉风格，并完善深色模式显示效果。",
-                "账户头像支持查看大图，以及裁剪、缩放和旋转后更换。",
-                "重新设计转账流向，清晰展示付款人、收款人及待转金额。",
-            ]
-        ),
-        ChangelogEntry(
-            id: "2026.07.05",
-            date: "2026 年 7 月 5 日",
-            title: "协作与账户体验更新",
-            items: [
-                "新增唯一用户名，支持使用用户名或邮箱登录。",
-                "新增账本邀请流程，被邀请者接受后才会正式加入。",
-                "收紧账本、成员和账单删除权限，普通成员可安全退出账本。",
-                "账单创建者无需重复确认，并精简待结算与历史结算展示。",
-                "新增本地使用模式、成员头像、账单范围筛选及多处界面优化。",
-            ]
-        ),
-        ChangelogEntry(
-            id: "2026.06.28",
-            date: "2026 年 6 月 28 日",
-            title: "共享账本稳定性更新",
-            items: [
-                "支持临时成员参与账单分摊。",
-                "优化付款人和成员身份匹配，修复部分账单无法创建的问题。",
-                "完善头像上传、显示与失败提示。",
-                "优化结算方案展示及账本成员刷新。",
-            ]
-        ),
-        ChangelogEntry(
-            id: "2026.06.14",
-            date: "2026 年 6 月 14 日",
-            title: "Evenly 初始版本",
-            items: [
-                "支持创建共享账本、添加成员和记录多人账单。",
-                "支持成员确认、自动分摊和结算建议。",
-                "支持账户注册、登录和个人资料管理。",
-            ]
-        ),
-    ]
+    static let all: [ChangelogEntry] = {
+        do {
+            return try load()
+        } catch {
+            NSLog("Failed to load changelog: %@", error.localizedDescription)
+            return []
+        }
+    }()
+
+    static func load(from bundle: Bundle = .main) throws -> [ChangelogEntry] {
+        guard let url = bundle.url(forResource: "changelog", withExtension: "json") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return try JSONDecoder().decode([ChangelogEntry].self, from: Data(contentsOf: url))
+    }
 }
 
 struct ChangelogView: View {
@@ -96,8 +45,23 @@ struct ChangelogView: View {
                 }
                 .padding(.vertical, 4)
             } header: {
-                Text(entry.date)
-                    .textCase(nil)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let version = entry.version {
+                        Text("版本 \(version)")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                    }
+                    Text(entry.date)
+                }
+                .textCase(nil)
+            }
+        }
+        .overlay {
+            if ChangelogEntry.all.isEmpty {
+                ContentUnavailableView(
+                    "暂时无法显示更新日志",
+                    systemImage: "clock.arrow.circlepath"
+                )
             }
         }
         .listStyle(.insetGrouped)

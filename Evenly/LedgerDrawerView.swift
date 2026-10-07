@@ -148,7 +148,7 @@ struct LedgerBookCover: View {
                     }
                 }
             }
-            .aspectRatio(0.68, contentMode: .fit)
+            .aspectRatio(LedgerCoverCrop.aspectRatio, contentMode: .fit)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(ledger.title)，\(ledger.memberCount) 人，\(ledger.expenseCount) 笔账单\(isCurrent ? "，当前账本" : "")")
         }
@@ -289,6 +289,7 @@ struct LedgerBookshelfView: View {
     let currentId: UUID?
     var onSelect: (Ledger) -> Void
     var onDelete: ((Ledger) -> Void)? = nil
+    var onRename: ((Ledger) -> Void)? = nil
     var canDelete: ((Ledger) -> Bool)? = nil
     /// Owner-only: change bookshelf cover (same COS flow as avatars).
     var onSetCover: ((Ledger) -> Void)? = nil
@@ -414,11 +415,10 @@ struct LedgerBookshelfView: View {
         }
         .buttonStyle(BookPressStyle())
         .contextMenu {
-            Button {
-                HapticManager.impact(.medium)
-                onSelect(ledger)
-            } label: {
-                Label("打开账本", systemImage: "book.fill")
+            if ledger.ownerId == currentUserId, let onRename {
+                Button { onRename(ledger) } label: {
+                    Label("修改名称", systemImage: "pencil")
+                }
             }
             if canDelete?(ledger) == true {
                 if let onSetCover {
@@ -495,8 +495,11 @@ struct LedgerDrawerView: View {
     @Environment(\.dismiss) var dismiss
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
+    @State private var ledgerToRename: Ledger?
     @State private var ledgerToDelete: Ledger?
     @State private var coverTarget: Ledger?
+    @State private var isChoosingCover = false
+    @State private var pendingCoverSelection: LedgerCoverSelection?
     @State private var coverPickerItem: PhotosPickerItem?
     @State private var isUploadingCover = false
     @State private var coverError: String?
@@ -529,9 +532,11 @@ struct LedgerDrawerView: View {
                         ledgerToDelete = ledger
                         showingDeleteConfirmation = true
                     },
+                    onRename: { ledgerToRename = $0 },
                     canDelete: { $0.ownerId == auth.user?.id },
                     onSetCover: { ledger in
                         coverTarget = ledger
+                        isChoosingCover = true
                     },
                     onClearCover: { ledger in
                         clearCover(ledger)
@@ -581,16 +586,23 @@ struct LedgerDrawerView: View {
                 }
             }
             .photosPicker(
-                isPresented: Binding(
-                    get: { coverTarget != nil },
-                    set: { if !$0 { coverTarget = nil } }
-                ),
+                isPresented: $isChoosingCover,
                 selection: $coverPickerItem,
                 matching: .images
             )
             .onChange(of: coverPickerItem) { _, item in
                 guard let item, let target = coverTarget else { return }
-                Task { await loadAndUploadCover(item: item, ledger: target) }
+                Task { await loadCoverForEditing(item: item, ledger: target) }
+            }
+            .sheet(item: $ledgerToRename) { ledger in
+                LedgerRenameView(ledger: ledger)
+            }
+            .sheet(item: $pendingCoverSelection) { selection in
+                LedgerCoverEditorView(image: selection.image) { edited in
+                    if let ledger = selection.ledger {
+                        uploadEditedCover(edited, ledger: ledger)
+                    }
+                }
             }
             .alert("封面上传失败", isPresented: Binding(
                 get: { coverError != nil },
@@ -618,8 +630,7 @@ struct LedgerDrawerView: View {
     }
 
     @MainActor
-    private func loadAndUploadCover(item: PhotosPickerItem, ledger: Ledger) async {
-        isUploadingCover = true
+    private func loadCoverForEditing(item: PhotosPickerItem, ledger: Ledger) async {
         coverError = nil
         defer {
             coverPickerItem = nil
@@ -629,29 +640,34 @@ struct LedgerDrawerView: View {
             guard let data = try await item.loadTransferable(type: Data.self),
                   let image = UIImage(data: data) else {
                 coverError = "无法读取图片"
-                isUploadingCover = false
                 return
             }
-            // Portrait-ish book ratio crop-center, compress like avatars.
-            let prepared = LedgerCoverImagePrep.jpegData(from: image) ?? data
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                ledgerStore.uploadLedgerCover(ledger, imageData: prepared) { result in
-                    isUploadingCover = false
-                    switch result {
-                    case .success:
-                        HapticManager.notificationOccurred(.success)
-                    case .failure(let error):
-                        coverError = error.localizedDescription
-                        HapticManager.notificationOccurred(.error)
-                    }
-                    cont.resume()
-                }
-            }
+            isChoosingCover = false
+            pendingCoverSelection = LedgerCoverSelection(image: image, ledger: ledger)
         } catch {
-            isUploadingCover = false
             coverError = error.localizedDescription
         }
     }
+
+    private func uploadEditedCover(_ image: UIImage, ledger: Ledger) {
+        guard let prepared = LedgerCoverImagePrep.jpegData(from: image) else {
+            coverError = "无法处理封面图片"
+            return
+        }
+        isUploadingCover = true
+        coverError = nil
+        ledgerStore.uploadLedgerCover(ledger, imageData: prepared) { result in
+            isUploadingCover = false
+            switch result {
+            case .success:
+                HapticManager.notificationOccurred(.success)
+            case .failure(let error):
+                coverError = error.localizedDescription
+                HapticManager.notificationOccurred(.error)
+            }
+        }
+    }
+
 }
 
 // MARK: - Shared cover image prep (create + bookshelf)
@@ -675,25 +691,26 @@ enum LedgerCoverImagePrep {
             crop.origin.y = (size.height - newH) / 2
             crop.size.height = newH
         }
-        guard let cg = image.cgImage?.cropping(to: CGRect(
-            x: crop.origin.x * image.scale,
-            y: crop.origin.y * image.scale,
-            width: crop.size.width * image.scale,
-            height: crop.size.height * image.scale
-        )) else {
-            return image.jpegData(compressionQuality: 0.82)
+        // Renderer sizes are in points. A default 3x renderer would turn a
+        // 1200-point cover into 3600 pixels and can exceed the upload limit.
+        // UIImage.draw also applies camera/Photos orientation before cropping.
+        let factor = min(1, maxEdge / max(crop.width, crop.height))
+        let outputSize = CGSize(width: crop.width * factor, height: crop.height * factor)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: outputSize, format: format)
+        let prepared = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: outputSize))
+            image.draw(in: CGRect(
+                x: -crop.minX * factor,
+                y: -crop.minY * factor,
+                width: size.width * factor,
+                height: size.height * factor
+            ))
         }
-        var cropped = UIImage(cgImage: cg, scale: image.scale, orientation: image.imageOrientation)
-        let longest = max(cropped.size.width, cropped.size.height)
-        if longest > maxEdge {
-            let scale = maxEdge / longest
-            let newSize = CGSize(width: cropped.size.width * scale, height: cropped.size.height * scale)
-            let renderer = UIGraphicsImageRenderer(size: newSize)
-            cropped = renderer.image { _ in
-                cropped.draw(in: CGRect(origin: .zero, size: newSize))
-            }
-        }
-        return cropped.jpegData(compressionQuality: 0.82)
+        return prepared.jpegData(compressionQuality: 0.82)
     }
 }
 
@@ -703,6 +720,7 @@ struct LedgerPickerBookshelf: View {
     @EnvironmentObject private var auth: AuthManager
     let searchText: String
     var onClearSearch: () -> Void = {}
+    @State private var ledgerToRename: Ledger?
     @State private var ownershipFilter: LedgerOwnershipFilter = .all
 
     private var items: [Ledger] {
@@ -719,6 +737,7 @@ struct LedgerPickerBookshelf: View {
                 onClearSearch()
                 ledgerStore.setCurrentLedger(ledger)
             },
+            onRename: { ledgerToRename = $0 },
             emptyTitle: "选择一本账本",
             emptyMessage: searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "创建账本后会出现在这里"
@@ -727,6 +746,9 @@ struct LedgerPickerBookshelf: View {
             ownershipFilter: $ownershipFilter,
             currentUserId: auth.user?.id
         )
+        .sheet(item: $ledgerToRename) { ledger in
+            LedgerRenameView(ledger: ledger)
+        }
     }
 }
 

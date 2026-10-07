@@ -13,6 +13,8 @@ struct ContentView: View {
     @StateObject var auth = AuthManager()
     @StateObject var ledgerStore = LedgerStore()
     @StateObject var themeManager = ThemeManager()
+    @StateObject private var appUpdates = AppUpdateManager()
+    @Environment(\.openURL) private var openURL
     @StateObject private var notifications = NotificationManager.shared
     @State private var selectedTab = 0
     @State private var sheetType: SheetType?
@@ -87,6 +89,24 @@ struct ContentView: View {
 
     private var contentWithAlerts: some View {
         contentWithSheet
+            .alert(
+                "发现新版本",
+                isPresented: Binding(
+                    get: { canPresentUpdate && appUpdates.pendingRelease != nil },
+                    set: { if !$0 && canPresentUpdate { appUpdates.snooze() } }
+                ),
+                presenting: appUpdates.pendingRelease
+            ) { _ in
+                Button("立即更新") {
+                    appUpdates.snooze()
+                    openURL(IOSUpdateRelease.storeURL)
+                }
+                Button("稍后", role: .cancel) {
+                    appUpdates.snooze()
+                }
+            } message: { release in
+                Text("Evenly \(release.latestVersion) 已发布。\n\n\(release.message)")
+            }
             // Do not force username/name/email setup after Sign in with Apple —
             // App Store Guideline 4 / SIWA: use Authentication Services data only.
             .alert("操作失败", isPresented: Binding(
@@ -135,6 +155,19 @@ struct ContentView: View {
             } message: { _ in
                 Text(expenseDeleteMessage)
             }
+    }
+
+    private var canPresentUpdate: Bool {
+        scenePhase == .active
+            && sheetType == nil
+            && shareSnapshot == nil
+            && actionError == nil
+            && !showingLeaveLedgerAlert
+            && !showingDeleteLedgerAlert
+            && !showingDeleteConfirmation
+            && expenseToDelete == nil
+            && !isHandlingJoinLink
+            && deepLinks.pendingJoinToken == nil
     }
 
     private var contentWithSheet: some View {
@@ -234,7 +267,13 @@ struct ContentView: View {
             ledgerStore.refreshInvitations()
             ledgerStore.fetchLedgers()
         }
+        .task {
+            await appUpdates.checkIfNeeded()
+        }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await appUpdates.checkIfNeeded() }
+            }
             if phase == .active, let userID = auth.user?.id {
                 if auth.isPlatformUser {
                     ledgerStore.stop()
@@ -425,6 +464,16 @@ struct ContentView: View {
                     currentUserId: auth.user?.id,
                     onEdit: {
                         sheetType = .editExpense(expense, ledger)
+                    },
+                    onChangeConfirmation: { currentExpense, status in
+                        await withCheckedContinuation { continuation in
+                            ledgerStore.respondToExpense(currentExpense, status: status, in: ledger) { result in
+                                if case .success = result {
+                                    loadSettlementData(for: ledger, force: true)
+                                }
+                                continuation.resume(returning: result)
+                            }
+                        }
                     },
                     onSetRefund: { amount, note in
                         await withCheckedContinuation { continuation in
@@ -1013,20 +1062,30 @@ struct ContentView: View {
         let mine = mySettlements(in: ledger)
         // Avoid a full-width spinner when we already have bills/settlements on screen.
         let showBlockingSpinner = isLoadingSettlementData && mine.isEmpty && ledger.expenses.isEmpty
-        if showBlockingSpinner || settlementError != nil || !mine.isEmpty {
+        if showBlockingSpinner || settlementError != nil || !mine.isEmpty || !ledger.expenses.isEmpty {
             Section {
                 if showBlockingSpinner {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if let err = settlementError, mine.isEmpty {
                     Label(err, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
+                } else if mine.isEmpty {
+                    Text("暂无与我相关的转账")
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(mine) { settlement in
                         mySettlementRow(settlement)
                     }
                 }
             } header: {
-                Text("与我相关的转账流向")
+                SettlementNetBalanceHeader(
+                    title: "与我相关的转账流向",
+                    settlements: mine,
+                    userId: auth.user?.id,
+                    isLoading: isLoadingSettlementData,
+                    hasError: settlementError != nil,
+                    formatAmount: formatAmount
+                )
             } footer: {
                 Text(ledger.requireConfirmation
                      ? "转账按全部账单预估（含未确认）；未确认相关会灰色标记"
@@ -1066,9 +1125,12 @@ struct ContentView: View {
                 Text(formatAmount(total))
                     .font(.system(size: 27, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .allowsTightening(true)
             }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             HStack(spacing: 10) {
                 Button {
@@ -1093,6 +1155,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -1204,14 +1267,14 @@ struct ContentView: View {
         }
     }
 
-    private func loadSettlementData(for ledger: Ledger) {
+    private func loadSettlementData(for ledger: Ledger, force: Bool = false) {
         // Stale-while-revalidate: only block the UI when there is nothing to show yet.
         let needsBlockingLoad = settlementSuggestions.isEmpty && ledger.expenses.isEmpty
         if needsBlockingLoad {
             isLoadingSettlementData = true
         }
         settlementError = nil
-        ledgerStore.fetchOverview(for: ledger, force: false) { result in
+        ledgerStore.fetchOverview(for: ledger, force: force) { result in
             isLoadingSettlementData = false
             switch result {
             case .success(let overview):

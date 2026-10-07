@@ -121,6 +121,9 @@ struct ExpenseUnifiedListRow: View {
 
     private func metaLine(for expense: Expense) -> some View {
         HStack(spacing: 8) {
+            if !(expense.receiptURLs ?? []).isEmpty {
+                Image(systemName: "paperclip").accessibilityLabel("附有凭据")
+            }
             Label(expense.payer.name, systemImage: "person")
             if !expense.participants.isEmpty {
                 Label(
@@ -208,5 +211,80 @@ struct ExpenseDetailHeader: View {
                 .font(.subheadline.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+
+// Shared personal net balance for the iPhone and iPad transfer sections.
+struct SettlementNetBalanceHeader: View {
+    let title: String
+    let settlements: [Settlement]
+    let userId: String?
+    let isLoading: Bool
+    let hasError: Bool
+    let formatAmount: (Decimal) -> String
+    @State private var showingExplanation = false
+
+    private var netBalance: Decimal {
+        guard let userId else { return .zero }
+        return settlements.reduce(Decimal.zero) { balance, settlement in
+            balance
+                + (settlement.toUserId == userId ? settlement.amount : .zero)
+                - (settlement.fromUserId == userId ? settlement.amount : .zero)
+        }
+    }
+
+    private var balanceTitle: String {
+        settlements.contains(where: { $0.includesUnconfirmed }) ? "预计净余额" : "净余额"
+    }
+
+    private var amountText: String {
+        guard !isLoading, !hasError, userId != nil else { return "—" }
+        let sign = netBalance > 0 ? "+" : (netBalance < 0 ? "−" : "")
+        return sign + formatAmount(abs(netBalance))
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(title)
+                Spacer(minLength: 8)
+                balanceButton
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                HStack {
+                    Spacer(minLength: 0)
+                    balanceButton
+                }
+            }
+        }
+        .textCase(nil)
+        .alert("净余额说明", isPresented: $showingExplanation) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("净余额 = 你垫付的金额 − 你承担的分摊金额（按退款后的金额计算）。\n\n正数表示你总体应收，负数表示你总体应付，零表示收支抵平；不代表与某一位成员的欠款。\n\n包含未确认账单时显示“预计净余额”；已拒绝账单不计入。当前未扣除已记录的转账，因此不代表剩余待转金额。")
+        }
+    }
+
+    private var balanceButton: some View {
+        Button {
+            showingExplanation = true
+        } label: {
+            HStack(spacing: 4) {
+                Text(balanceTitle)
+                Text(amountText)
+                    .monospacedDigit()
+                Image(systemName: "info.circle")
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(balanceTitle) \(amountText)")
+        .accessibilityHint("查看净余额的计算方式和金额说明")
     }
 }

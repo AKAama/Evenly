@@ -17,6 +17,9 @@ struct AddExpenseView: View {
     @State private var amountText: String = ""
     @State private var selectedPayerId: UUID?
     @State private var selectedParticipantIds: Set<UUID> = []
+    @State private var receiptURLs: [String] = []
+    @State private var receiptImages: [Data] = []
+    @State private var isLoadingReceipts = false
     @State private var isSaving = false
     @State private var transcript: String?
     @State private var errorMessage: String?
@@ -137,6 +140,7 @@ struct AddExpenseView: View {
         self.ledgerId = ledgerId
         self.onSave = onSave
         self.existingId = expense?.id
+        _receiptURLs = State(initialValue: expense?.receiptURLs ?? [])
         _title = State(initialValue: expense?.title ?? "")
         _selectedCategory = State(initialValue: expense?.category)
         _selectedIcon = State(initialValue: expense?.icon)
@@ -165,6 +169,11 @@ struct AddExpenseView: View {
                     headerCard
                     presetCard
                     peopleSummaryCard
+                    if ledgerId != nil {
+                        ExpenseReceiptPicker(urls: $receiptURLs, images: $receiptImages,
+                                             isLoading: $isLoadingReceipts, isSaving: isSaving,
+                                             expenseId: existingId)
+                    }
                     if let errorMessage {
                         errorCard(errorMessage)
                     }
@@ -187,6 +196,7 @@ struct AddExpenseView: View {
                 .ignoresSafeArea()
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selectedParticipantIds.count)
+            .interactiveDismissDisabled(isSaving)
             .navigationTitle(existingId == nil ? "新建账单" : "编辑账单")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPeoplePickerPresented) {
@@ -215,6 +225,7 @@ struct AddExpenseView: View {
                         HapticManager.impact(.light)
                         dismiss()
                     }
+                    .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -226,7 +237,7 @@ struct AddExpenseView: View {
                             Text("保存").fontWeight(.semibold)
                         }
                     }
-                    .disabled(!canSave || isSaving)
+                    .disabled(!canSave || isSaving || isLoadingReceipts)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -736,7 +747,9 @@ struct AddExpenseView: View {
 
     private func saveExpense() {
         focusedField = nil
-        guard let amount = Decimal(string: amountText),
+        guard !isSaving, !isLoadingReceipts,
+              receiptURLs.count + receiptImages.count <= 3,
+              let amount = Decimal(string: amountText),
               !title.isEmpty,
               let payer = selectedPayer,
               payer.userId?.isEmpty == false else { return }
@@ -751,15 +764,17 @@ struct AddExpenseView: View {
         errorMessage = nil
         isSaving = true
 
-        let expense = Expense(
+        var expense = Expense(
             id: existingId ?? UUID(),
             title: title,
             amount: amount,
             payer: payer,
             participants: Array(selectedParticipants),
             category: selectedCategory,
-            icon: selectedIcon
+            icon: selectedIcon,
+            receiptURLs: receiptURLs
         )
+        expense.receiptUploadData = receiptImages
 
         Task {
             let result = await onSave(expense)

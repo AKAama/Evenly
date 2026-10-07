@@ -83,8 +83,13 @@ struct ExpenseDetailView: View {
     let ledger: Ledger
     var currentUserId: String? = nil
     var onEdit: (() -> Void)? = nil
+    var onChangeConfirmation: ((Expense, ConfirmationStatus) async -> Result<Expense, Error>)? = nil
     var onSetRefund: ((Decimal, String?) async -> Result<Expense, Error>)? = nil
 
+    @State private var isChangingConfirmation = false
+    @State private var confirmationError: String?
+    @ScaledMetric(relativeTo: .caption) private var confirmationColumnWidth: CGFloat = 96
+    @ScaledMetric(relativeTo: .caption) private var confirmationIconWidth: CGFloat = 16
     @State private var showRefundSheet = false
     @State private var refundText = ""
     @State private var refundNote = ""
@@ -108,6 +113,17 @@ struct ExpenseDetailView: View {
             && (current.createdBy == currentUserId || current.payer.userId == currentUserId)
     }
 
+    private var canChangeConfirmation: Bool {
+        guard let currentUserId else { return false }
+        let response = current.confirmations[currentUserId]
+        return ledger.requireConfirmation
+            && onChangeConfirmation != nil
+            && (response == .confirmed || response == .rejected)
+            && current.createdBy != currentUserId
+            && current.payer.userId != currentUserId
+            && current.participants.contains { $0.userId == currentUserId }
+    }
+
     var body: some View {
         List {
             Section {
@@ -125,29 +141,50 @@ struct ExpenseDetailView: View {
                 }
             }
 
+            if let urls = current.receiptURLs, !urls.isEmpty {
+                Section("凭据（\(urls.count)）") {
+                    ExpenseReceiptGallery(urls: urls, expenseId: current.id)
+                }
+            }
+
             Section("参与成员") {
                 ForEach(current.participants) { participant in
-                    HStack(spacing: 12) {
-                        RemoteAvatarView(
-                            avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
-                            fallbackText: participant.name,
-                            size: 36
-                        )
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(participant.name)
-                                .font(.body)
-                            if participant.userId == current.payer.userId {
-                                Text("付款人")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 12) {
+                            RemoteAvatarView(
+                                avatarUrl: memberRecord(for: participant)?.user?.avatarUrl,
+                                fallbackText: participant.name,
+                                size: 36
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(participant.name)
+                                    .font(.body)
+                                if participant.userId == current.payer.userId {
+                                    Text("付款人")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if ledger.requireConfirmation {
+                                confirmationLabel(for: participant)
                             }
                         }
-                        Spacer()
-                        if ledger.requireConfirmation {
-                            confirmationLabel(for: participant)
+                        if participant.userId == currentUserId, let confirmationError {
+                            Text(confirmationError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 8)
+                    .overlay(alignment: .bottom) {
+                        if participant.id != current.participants.last?.id {
+                            Divider().padding(.leading, 48)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
                 }
             }
 
@@ -185,6 +222,7 @@ struct ExpenseDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .interactiveDismissDisabled(isChangingConfirmation)
         .navigationTitle("账单详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -276,6 +314,25 @@ struct ExpenseDetailView: View {
         }
     }
 
+    @MainActor
+    private func changeConfirmation(to status: ConfirmationStatus) async {
+        guard canChangeConfirmation, !isChangingConfirmation,
+              let currentUserId, current.confirmations[currentUserId] != status,
+              status == .confirmed || status == .rejected,
+              let onChangeConfirmation else { return }
+        isChangingConfirmation = true
+        confirmationError = nil
+        defer { isChangingConfirmation = false }
+        switch await onChangeConfirmation(current, status) {
+        case .success(let updated):
+            displayedExpense = updated
+            HapticManager.notificationOccurred(.success)
+        case .failure(let error):
+            confirmationError = error.localizedDescription
+            HapticManager.notificationOccurred(.error)
+        }
+    }
+
     private func memberRecord(for participant: Person) -> MemberResponse? {
         ledger.members?.first {
             $0.id == participant.id.uuidString
@@ -285,26 +342,61 @@ struct ExpenseDetailView: View {
 
     @ViewBuilder
     private func confirmationLabel(for participant: Person) -> some View {
-        if participant.userId == current.createdBy
-            || participant.userId == current.payer.userId {
-            Label("无需确认", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
+        if participant.userId == currentUserId && canChangeConfirmation {
+            Menu {
+                if current.confirmationStatus(for: participant) == .confirmed {
+                    Button("改为拒绝", systemImage: "xmark.circle", role: .destructive) {
+                        Task { await changeConfirmation(to: .rejected) }
+                    }
+                } else {
+                    Button("改为确认", systemImage: "checkmark.circle") {
+                        Task { await changeConfirmation(to: .confirmed) }
+                    }
+                }
+            } label: {
+                confirmationStatusContent(for: participant, isInteractive: true)
+            }
+            .buttonStyle(.plain)
+            .disabled(isChangingConfirmation)
+            .accessibilityLabel("你的状态：\(confirmationPresentation(for: participant).text)")
+            .accessibilityHint("点开可修改你自己的确认或拒绝决定")
         } else {
-            switch current.confirmationStatus(for: participant) {
-            case .confirmed:
-                Label("已确认", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            case .rejected:
-                Label("已拒绝", systemImage: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            case .pending:
-                Text(participant.isTemporary ? "无需确认" : "待确认")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            confirmationStatusContent(for: participant, isInteractive: false)
+        }
+    }
+
+    private func confirmationPresentation(for participant: Person) -> (text: String, icon: String, color: Color) {
+        if participant.userId == current.createdBy || participant.userId == current.payer.userId || participant.isTemporary {
+            return ("无需确认", "checkmark.circle.fill", .green)
+        }
+        switch current.confirmationStatus(for: participant) {
+        case .confirmed: return ("已确认", "checkmark.circle.fill", .green)
+        case .rejected: return ("已拒绝", "xmark.circle.fill", .red)
+        case .pending: return ("待确认", "clock", .secondary)
+        }
+    }
+
+    private func confirmationStatusContent(for participant: Person, isInteractive: Bool) -> some View {
+        let presentation = confirmationPresentation(for: participant)
+        return HStack(spacing: 6) {
+            Group {
+                if isInteractive && isChangingConfirmation {
+                    ProgressView().controlSize(.mini).tint(presentation.color)
+                } else {
+                    Image(systemName: presentation.icon)
+                }
+            }
+            .frame(width: confirmationIconWidth)
+            Text(presentation.text).lineLimit(1)
+            Spacer(minLength: 0)
+            if isInteractive {
+                Image(systemName: "chevron.down").font(.caption2)
             }
         }
+        .font(.caption)
+        .foregroundStyle(presentation.color)
+        .frame(width: confirmationColumnWidth, alignment: .leading)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }

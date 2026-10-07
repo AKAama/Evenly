@@ -27,6 +27,7 @@ struct AddMemberView: View {
         auth.user?.id == ledger.ownerId
     }
 
+    @State private var showingRenameLedger = false
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
@@ -65,6 +66,25 @@ struct AddMemberView: View {
                         Label(success, systemImage: "checkmark.circle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.green)
+                    }
+                }
+
+                Section("账本信息") {
+                    if isOwner {
+                        Button {
+                            showingRenameLedger = true
+                        } label: {
+                            HStack {
+                                Text("账本名称").foregroundStyle(.primary)
+                                Spacer()
+                                Text(ledger.title).foregroundStyle(.secondary).lineLimit(1)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    } else {
+                        LabeledContent("账本名称", value: ledger.title)
                     }
                 }
 
@@ -219,6 +239,9 @@ struct AddMemberView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("确定要删除成员 \"\(memberToDelete?.name ?? "")\" 吗？")
+            }
+            .sheet(isPresented: $showingRenameLedger) {
+                LedgerRenameView(ledger: ledger)
             }
             .sheet(isPresented: $showingAddTemporary) {
                 NavigationStack {
